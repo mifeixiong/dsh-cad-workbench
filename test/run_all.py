@@ -5,13 +5,20 @@ import shutil
 import subprocess
 import sys
 
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+CHILD_ENV = dict(os.environ, PYTHONUTF8='1', PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1')
 
 
 def run(label, command, cwd=ROOT):
     print('\n=== %s ===' % label)
-    result = subprocess.run(command, cwd=cwd)
+    result = subprocess.run(command, cwd=cwd, env=CHILD_ENV)
     print('--- %s exit=%s' % (label, result.returncode))
     return result.returncode
 
