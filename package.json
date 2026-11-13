@@ -1,0 +1,71 @@
+{
+  "name": "dsh-cad-workbench",
+  "version": "0.1.0",
+  "description": "机械 CAD 工作台：SolidWorks 声明式建模、实测校核、视图自检、工程图与 DXF/STEP/STL 审查（DeepSeek Harness 插件）。",
+  "type": "module",
+  "main": "index.js",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "scripts",
+    "skills",
+    "rules",
+    "docs",
+    "icon.svg",
+    "cordis.patch.yml",
+    "dsh.plugin.json",
+    "README.md",
+    "README.en.md",
+    "NOTICE.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "solidworks",
+    "cad",
+    "mechanical-design",
+    "feature-graph",
+    "dxf",
+    "step",
+    "engineering"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mifeixiong/dsh-cad-workbench.git"
+  },
+  "homepage": "https://github.com/mifeixiong/dsh-cad-workbench#readme",
+  "bugs": {
+    "url": "https://github.com/mifeixiong/dsh-cad-workbench/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/selftest.mjs",
+    "test:python": "python test/run_all.py --python-only",
+    "test:live": "python test/live_smoke.py",
+    "verify:installed": "node test/verify_installed.mjs"
+  }
+}

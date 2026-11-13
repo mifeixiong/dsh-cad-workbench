@@ -1,0 +1,70 @@
+{
+  "version": 2,
+  "description": "机械制图 DXF 审查规则（适配 SolidWorks 导出的中英图层；可用 cadw_review.rules 覆盖字段）。",
+  "units": {
+    "allowed": [
+      4,
+      6
+    ]
+  },
+  "layers": {
+    "required": [
+      "OUTLINE",
+      "CENTER",
+      "HIDDEN",
+      "DIM"
+    ],
+    "aliases": {
+      "OUTLINE": [
+        "轮廓实线层",
+        "SLD-0",
+        "0"
+      ],
+      "THIN": [
+        "细线层"
+      ],
+      "CENTER": [
+        "中心线层"
+      ],
+      "HIDDEN": [
+        "虚线层"
+      ],
+      "HATCH": [
+        "剖面线层"
+      ],
+      "TEXT": [
+        "文字层"
+      ],
+      "DIM": [
+        "标注层"
+      ]
+    },
+    "pattern": null,
+    "forbidden": [],
+    "strict": false
+  },
+  "linetypes": {
+    "CENTER": [
+      "CENTER",
+      "CENTER2"
+    ],
+    "HIDDEN": [
+      "HIDDEN",
+      "HIDDEN2"
+    ]
+  },
+  "entities": {
+    "max_zero_length": 0,
+    "max_duplicate_pairs": 20
+  },
+  "dimensions": {
+    "min_count": 3
+  },
+  "text": {
+    "min_height_mm": 2.5
+  },
+  "extents": {
+    "min_size_mm": 1,
+    "max_size_mm": 6000
+  }
+}

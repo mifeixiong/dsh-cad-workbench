@@ -1,0 +1,6 @@
+# dsh-cad-workbench bundle patch: mount the host plugin under its package name,
+# resolved through the profile's node_modules.
+
+- insert:
+    - id: dsh-cad-workbench
+      name: dsh-cad-workbench

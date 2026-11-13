@@ -1,0 +1,10 @@
+node_modules/
+.pylibs/
+cad-output/
+.cad-workbench/
+__pycache__/
+*.pyc
+test/out/
+test/fixtures/generated/
+*.log
+.DS_Store
