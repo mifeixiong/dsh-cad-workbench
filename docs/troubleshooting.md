@@ -6,6 +6,30 @@
 2. `cadw_doctor` 看 `solidworks.registered` 与 `running`。
 3. 仍失败：确认 Python 带 pywin32（`python -c "import win32com"`），或设 `CADW_PYTHON`。
 
+## SolidWorks 明明开着，list/status 却说未运行
+
+- 旧版只用 `GetActiveObject`（走 ROT）；SW2024 偶发 ROT 没注册，报 `MK_E_UNAVAILABLE`。
+- 现在先枚举 `SLDWORKS.exe` 进程，确认已运行才用 `Dispatch` 回退；list/status 仍然只附着、不拉起。
+- 仍失败：确认 Python 与 SolidWorks 在**同一个 Windows 会话、同一用户、同等权限**下运行；
+  不要一边用管理员启动 SolidWorks，一边用普通权限跑 DSH。
+
+## 关闭文档时卡住 / 弹出保存确认框
+
+- `CloseDoc` 对未保存文档可能弹保存对话框，把调用方卡到超时。
+- 插件对脏文档默认拒绝；`confirm:true` 会走 `QuitDoc`（明确不保存），或用 `save_unsaved:true` 先保存。
+- 若 SolidWorks 已经弹着别的模态框，先关掉对话框再重试。
+
+## list 里有我看不到的文档
+
+- `GetDocuments` 会包含被装配体/工程图引用、但没有独立窗口的隐藏文档；它们标 `window:false`、`index:null`。
+- 默认关闭只动可见窗口；隐藏文档需要 `include_hidden:true`，先确认不会影响装配引用。
+
+## 关闭后报 CLOSE_FAILED
+
+- 插件关闭后会重新枚举 `GetDocuments` 复核；文档还在就报错，不谎报成功。
+- 常见原因：保存确认框/其他模态框挡住、文档被 SolidWorks 锁定、或关闭命令尚未完成；关掉对话框后重试。
+- 批量关闭部分失败会返回 `partial:true` 与 `failed[]`，按 `failed[].code` 处理。
+
 ## 找不到零件模板
 
 - doctor 的 `solidworks.templates.part.path` 为空。

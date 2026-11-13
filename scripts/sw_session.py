@@ -48,25 +48,28 @@ def _counts(entries):
     }
 
 
-def _inventory_payload(app):
+def _inventory_payload(app, include_hidden=False):
     entries = common.document_inventory(app)
     counts = _counts(entries)
+    listed = entries if include_hidden else [entry for entry in entries if entry.get('window')]
     active = next((entry['doc_id'] for entry in entries if entry.get('active')), None)
     return {
-        'documents': entries,
+        'documents': listed,
         'document_count': counts['documents'],
         'window_count': counts['windows'],
         'hidden_count': counts['hidden'],
         'dirty_count': counts['dirty'],
         'active_doc_id': active,
-        'summary': _inventory_summary(entries, counts),
+        'include_hidden': bool(include_hidden),
+        'summary': _inventory_summary(entries, counts, include_hidden),
     }
 
 
-def _inventory_summary(entries, counts):
+def _inventory_summary(entries, counts, include_hidden=False):
     lines = ['已打开 %d 个文档：窗口 %d，隐藏 %d，未保存 %d' % (
         counts['documents'], counts['windows'], counts['hidden'], counts['dirty'])]
-    for entry in entries[:40]:
+    listed = entries if include_hidden else [entry for entry in entries if entry.get('window')]
+    for entry in listed[:40]:
         state = '未保存' if entry.get('saved') is not True else '已保存'
         path = entry.get('path') or ''
         if entry.get('window'):
@@ -85,8 +88,10 @@ def _inventory_summary(entries, counts):
                 state,
                 path,
             ))
-    if len(entries) > 40:
-        lines.append('…（其余 %d 个见 documents 字段）' % (len(entries) - 40))
+    if len(listed) > 40:
+        lines.append('…（其余 %d 个见 documents 字段）' % (len(listed) - 40))
+    if not include_hidden and counts['hidden']:
+        lines.append('隐藏/参考文档 %d 个未列出（默认不动；查看请传 include_hidden=true）' % counts['hidden'])
     return '\n'.join(lines)
 
 
@@ -105,18 +110,18 @@ def _empty_inventory(message):
     }
 
 
-def action_status(app):
+def action_status(app, spec=None):
     if app is None:
         return _empty_inventory('SolidWorks 未运行（status 只附着，不拉起）')
-    payload = _inventory_payload(app)
+    payload = _inventory_payload(app, bool(spec and spec.get('include_hidden')))
     payload.update({'ok': True, 'connected': True, 'version': common.version_info(app)})
     return payload
 
 
-def action_list(app):
+def action_list(app, spec=None):
     if app is None:
         return _empty_inventory('SolidWorks 未运行（list 只附着，不拉起）')
-    payload = _inventory_payload(app)
+    payload = _inventory_payload(app, bool(spec and spec.get('include_hidden')))
     payload.update({'ok': True, 'connected': True})
     return payload
 
@@ -423,11 +428,10 @@ def action_close_all(app, spec):
         raise common.CadError('CONFIRM_REQUIRED', 'close_all 需要 confirm=true（可先 dry_run=true 预览）。')
     targets, skipped = _bulk_targets(app, spec, 'close_all')
     if not targets:
-        payload = _inventory_payload(app)
         return {
             'ok': True, 'action': 'close_all', 'closed_documents': [], 'closed_count': 0,
             'saved_documents': [], 'discarded': [], 'failed': [], 'skipped': skipped,
-            'partial': False, 'remaining': _counts(payload['documents']),
+            'partial': False, 'remaining': _counts(common.document_inventory(app)),
             'summary': '没有可关闭的可见窗口' + ('（隐藏文档未动）' if skipped else ''),
         }
     return _close_targets(app, targets, spec, 'close_all', skipped)
@@ -438,11 +442,10 @@ def action_close_others(app, spec):
         raise common.CadError('CONFIRM_REQUIRED', 'close_others 需要 confirm=true（可先 dry_run=true 预览）。')
     targets, skipped = _bulk_targets(app, spec, 'close_others')
     if not targets:
-        payload = _inventory_payload(app)
         return {
             'ok': True, 'action': 'close_others', 'closed_documents': [], 'closed_count': 0,
             'saved_documents': [], 'discarded': [], 'failed': [], 'skipped': skipped,
-            'partial': False, 'remaining': _counts(payload['documents']),
+            'partial': False, 'remaining': _counts(common.document_inventory(app)),
             'summary': '没有需要关闭的窗口（保留列表之外没有可见窗口）',
         }
     return _close_targets(app, targets, spec, 'close_others', skipped)
@@ -536,7 +539,7 @@ def main(spec):
             app = common.attach(launch=False)
         except common.CadError as error:
             return _connection_error_payload(action_status(None), error)
-        return action_status(app)
+        return action_status(app, spec)
     with common.sw_lock('sw_session:' + action, workspace=workspace):
         launch = action in ('new_part', 'new_assembly', 'open')
         try:
@@ -546,7 +549,7 @@ def main(spec):
                 return _connection_error_payload(action_list(None), error)
             raise
         if action == 'list':
-            return action_list(app)
+            return action_list(app, spec)
         if action == 'new_part':
             return action_new(app, spec, 'part')
         if action == 'new_assembly':

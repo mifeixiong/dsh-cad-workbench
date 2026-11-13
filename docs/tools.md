@@ -8,9 +8,32 @@
 `freecad`、`lock`、`state_dir_writable`、`workspace_writable`、`capabilities`、`suggestions`、`summary`。
 
 ## cadw_session
-参数：`action`（status/new_part/new_assembly/open/activate/save/save_as/close/close_all/list）、
-`path?`、`template?`、`doc?`、`confirm?`、`visual?`、`allow_outside?`。
-返回：`doc{doc_id,title,path,type,saved,active}`、`documents[]`。
+参数：`action`（status/list/new_part/new_assembly/open/activate/save/save_as/close/close_others/close_all）、
+`path?`、`template?`、`doc?`、`docs?`、`indexes?`、`index?`、`keep?`、`dry_run?`、
+`save_unsaved?`、`include_hidden?`、`confirm?`、`visual?`、`allow_outside?`。
+
+### 窗口清单（status / list）
+默认**只列可见窗口**；`include_hidden:true` 时 `documents[]` 才包含隐藏/参考文档。
+每项：`{index,doc_id,title,path,type,saved,window,active}`。
+- `index`：1-based 窗口序号，仅在本次调用内有效；关闭后序号会变，重新 list 再取；隐藏文档为 null；
+- `window`：是否为可见模型窗口（`IFrame.ModelWindows`）；false 是装配/工程图引用但未显示的隐藏文档；
+- `saved`：false 或 null 表示有未保存修改/读不到保存标记（按脏处理）。
+另返回 `document_count`（全部已加载文档数）、`window_count`、`hidden_count`、`dirty_count`、
+`active_doc_id`、`include_hidden`、`summary`。大装配体常有几十个隐藏引用文档，默认不刷屏。
+
+### 关闭（close / close_others / close_all）
+- `close`：`doc`（单个 doc_id）、`docs`（多个 doc_id）、`indexes`（窗口序号）可并用，自动去重；
+- `close_others`：`keep` 必填（要保留的 doc_id 或序号），关闭其余可见窗口；
+- `close_all`：关闭全部可见窗口；`close_others` / `close_all` 需要 `confirm:true`。
+- 有未保存修改的文档默认拒绝（`CONFIRM_REQUIRED`）；`confirm:true` 用 `QuitDoc` 丢弃（不弹保存框），
+  `save_unsaved:true` 先保存再关（无磁盘路径 → `SAVE_FAILED`）。
+- 默认只动可见窗口；隐藏/参考文档需要 `include_hidden:true`，否则 `HIDDEN_DOC` 或列进 `skipped`。
+- `dry_run:true` 只返回 `would_close` / `dirty` / `plan` / `requires_confirm`，不改状态。
+- 返回 `closed_documents[]`、`saved_documents[]`、`discarded[]`、`failed[]`、`skipped[]`、`partial`、`remaining`；
+  关闭后轮询 `GetDocuments` 复核，没消失报 `CLOSE_FAILED`，部分失败 `partial:true`，不谎报。
+
+`activate` 支持 `doc` 或 `index`（窗口序号），只激活一个文档。
+
 Save As 后 `doc_id` 会变；危险动作未确认时返回 `CONFIRM_REQUIRED`。
 
 ## cadw_model

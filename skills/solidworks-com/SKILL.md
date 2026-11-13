@@ -29,6 +29,19 @@ description: "SolidWorks COM 自动化事实与坑：后期绑定、模板探测
 - 每次写前复核 `GetPathName` / `GetTitle`；不符就拒绝。
 - **Save As 后 doc_id 会变**：令牌按路径算，保存成功要重新取令牌。
 
+## 已打开文档 / 窗口
+
+- `ISldWorks::GetDocuments` 返回**所有已加载文档**，包括装配/工程图引用但不可见的文档；
+  “用户看到的窗口”用 `ISldWorks::Frame.ModelWindows`（`IModelWindow.ModelDoc` / `Title` / `HWnd`）枚举。
+- `GetSaveFlag` 为 True 表示有未保存修改；读不到时按脏处理（宁可多问一句，不要静默丢改动）。
+- `CloseDoc(name)` 关闭干净文档；对脏文档可能弹保存确认框，把调用方卡到超时。
+- `QuitDoc(name)` 关闭指定文档且**不保存**（无保存框）；批量丢弃用 `CloseAllDocuments(True)`，
+  只关干净文档用 `CloseAllDocuments(False)`。
+- 关闭后重新枚举 `GetDocuments` 复核，不要只看 `CloseDoc` 返回值（常是 None）。
+- `GetActiveObject` 在 SW2024 上可能返回 `MK_E_UNAVAILABLE`（ROT 未注册）；先枚举
+  `SLDWORKS.exe` 进程确认已运行，再用 `Dispatch` 附着。不要为了 list/status 拉起 SW。
+- 官方 Remarks：后台会话关闭最后一个文档可能让 SolidWorks 退出；可见会话通常不会。
+
 ## 模板
 
 - 优先 API 用户首选项（零件 101 / 装配 102 / 工程图 103），再扫

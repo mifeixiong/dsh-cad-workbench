@@ -24,13 +24,23 @@
 - 只删本次新增，不碰用户原有特征；删除失败才退到 `EditUndo2`，且有界。
 - 回滚失败返回 `ROLLBACK_FAILED` 并保留现场，不静默关闭文档。
 
+## 文档窗口
+
+- 默认只操作 `IFrame.ModelWindows` 里的可见窗口；`GetDocuments` 里那些被装配/工程图引用但不可见的文档标
+  `window:false`，默认跳过，避免关掉后装配体丢引用。
+- 关闭前读 `GetSaveFlag`：干净文档走 `CloseDoc`，脏文档默认拒绝；确认丢弃才走 `QuitDoc`（明确不保存、不弹保存框）。
+- 批量关闭先做 dry-run 预览；关闭后重新枚举 `GetDocuments` 复核，没关掉就报 `CLOSE_FAILED`。
+- `GetActiveObject` 在部分 SW2024 上会返回 `MK_E_UNAVAILABLE`（ROT 没注册）；插件先枚举 `SLDWORKS.exe` 进程，
+  确认已运行才用 `Dispatch` 回退，绝不因为 list/status 把 SolidWorks 拉起来。
+
 ## 危险动作
 
 需要 `confirm:true`：
 
 - `save_as` 覆盖已存在的 `.sldprt/.sldasm/.slddrw`；
-- `close` 一个有未保存修改的文档；
-- `close_all`；
+- `close` 一个有未保存修改的文档（或 `save_unsaved:true` 先保存）；
+- `close_others` / `close_all`；
+- 关闭 `window:false` 的隐藏/参考文档（`include_hidden:true`）；
 - `cadw_export` / `cadw_drawing` 覆盖已存在产物。
 
 ## 路径

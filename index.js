@@ -197,7 +197,7 @@ function registerTools(ctx) {
       keep: { type: 'array', description: 'close_others：要保留的 doc_id 或窗口序号，至少一个' },
       dry_run: { type: 'boolean', description: '只预览将关闭/丢弃哪些文档，不改 SolidWorks 状态' },
       save_unsaved: { type: 'boolean', description: '关闭前先保存有未保存修改的文档（默认拒绝丢弃；无磁盘路径会报 SAVE_FAILED）' },
-      include_hidden: { type: 'boolean', description: '允许关闭/操作未显示为窗口的隐藏/参考文档（默认只动可见窗口）' },
+      include_hidden: { type: 'boolean', description: '允许关闭/操作隐藏/参考文档，并让 list/status 列出它们（默认只列/只动可见窗口）' },
       confirm: { type: 'boolean', description: '危险动作确认：覆盖已有文件、丢弃未保存修改、close_all/close_others' },
       visual: { type: 'boolean', description: '是否把 SolidWorks 前台置前并显示等轴测（默认 true）' },
       workspace: { type: 'string', description: '工作区根目录；缺省用会话当前目录' },
@@ -214,7 +214,9 @@ function registerTools(ctx) {
         doc: args.doc ?? null,
         docs: Array.isArray(args.docs) ? args.docs.map((item) => String(item)) : null,
         indexes: Array.isArray(args.indexes) ? args.indexes.map((item) => Number(item)) : null,
-        index: Number.isFinite(Number(args.index)) ? Number(args.index) : null,
+        index: args.index === undefined || args.index === null || !Number.isFinite(Number(args.index))
+          ? null
+          : Number(args.index),
         keep: Array.isArray(args.keep) ? args.keep : null,
         dry_run: args.dry_run === true,
         save_unsaved: args.save_unsaved === true,

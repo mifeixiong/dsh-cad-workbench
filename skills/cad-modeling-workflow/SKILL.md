@@ -92,6 +92,13 @@ description: "SolidWorks 机械 CAD 总控流程：需求→参数表→批准�
    4 视图里至少等轴测 + 俯视要能看出特征。
 3. 有疑问就量：不要靠"看起来对"。
 
+## 5.5 收尾窗口
+
+- `cadw_session({action:"list"})` 看一眼本次是否留下测试文档；用 `close` / `close_others` 关掉本次创建的临时窗口，
+  不要关用户原有文档。
+- 有未保存修改时默认会被拒绝：先 `save_unsaved:true` 或明确询问用户；`confirm:true` 会丢弃，不要擅自用。
+- 隐藏/参考文档（`window:false`）默认不动；确需关闭才传 `include_hidden:true`。
+
 ## 6. 工程图与导出
 
 - 先 `cadw_session({action:"save_as", path:"cad-output/<name>.sldprt"})`（工程图需要磁盘文件）。

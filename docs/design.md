@@ -28,11 +28,14 @@
 | 校验实现 | 单一 Python 实现（scripts/graph.py） | 避免 JS/Python 两套规则漂移 |
 | 期望比对 | JS（lib/plan.js） | 纯函数、易测；结果写回台账 |
 | 文档身份 | 路径/标题的 sha256 前 16 位 | 不依赖 COM 指针生命周期；Save As 后令牌会变（显式） |
+| 窗口清单 | Frame.ModelWindows + GetDocuments | 区分可见窗口与隐藏/参考文档；用户说"关窗口"通常只指前者 |
+| 关闭策略 | 干净 CloseDoc / 脏 QuitDoc | CloseDoc 对脏文档可能弹保存框卡住调用方；QuitDoc 明确不保存关闭 |
+| 附着 | GetActiveObject → 进程校验后 Dispatch | SW2024 偶发 ROT 未注册（MK_E_UNAVAILABLE）；先查进程，避免 list/status 拉起 SW |
 | 回滚 | 按名删除「当前 - 构建前快照」 | EditUndo2 会撤到用户特征；DeleteSelection2(0) 精确，失败节点残留也能清 |
 | 锁 | OS 文件锁（msvcrt/flock） | 进程崩溃由内核释放；无 stale 接管竞态 |
 | 图片 | SaveBMP→PNG + 像素统计 | 不依赖窗口截屏；自动识别空白/全黑 |
 | 错误 | ok:false + error{code,message,details} | 模型能按 code 决策；细节不丢 |
-| 工具面 | 9 个，cadw_ 前缀 | 覆盖全流程，避免与生态冲突 |
+| 工具面 | 10 个，cadw_ 前缀 | 覆盖全流程，避免与生态冲突 |
 
 ## 信任等级
 
@@ -66,6 +69,7 @@ cadw_job.finish 只在这三种状态上给 delivered/partial/failed；partial �
 	lib/ledger.js            台账与不可变修订
 	scripts/sw_common.py     COM/模板/身份/锁/草图/特征/保存/图像
 	scripts/graph.py         唯一图校验器
+	scripts/sw_session.py    新建/打开/保存/激活 + 已打开窗口清单与关闭
 	scripts/sw_build.py      执行 + 回滚 + 实测
 	scripts/sw_measure.py    几何事实
 	scripts/sw_capture.py    视图 + 拼图 + 像素统计
@@ -80,5 +84,6 @@ cadw_job.finish 只在这三种状态上给 delivered/partial/failed；partial �
 ## Roadmap
 
 - v0.2 ✅：sweep / linear_pattern / circular_pattern；cadw_assembly（插入 + 平面配合 + 固定）。
-- v0.3：装配干涉检查与运动；shell 节点；偏移基准面；slot/rounded_rect；扫掠切除。
-- v0.4：可选 FreeCAD/CadQuery 后端（能力路由）；CAD 模式预设；Web 端只读查看器。
+- v0.3.0 ✅：辅助线/交点孔、圆柱面同心配合、已打开窗口管理（list 清单、close 批量、close_others、close_all；脏文档/隐藏文档保护）。
+- v0.4：装配干涉检查与运动；shell 节点；偏移基准面；slot/rounded_rect；扫掠切除。
+- v0.5：可选 FreeCAD/CadQuery 后端（能力路由）；CAD 模式预设；Web 端只读查看器。

@@ -1,12 +1,29 @@
 # Changelog
 
-## 0.3.0 (2026-11-13) · 辅助线驱动建模 + 圆柱面同心配合
+## 0.3.0 (2026-11-13) · 辅助线驱动建模 + 圆柱面同心配合 + 窗口管理
 
 - Feature Graph 新增 `line` 实体与 `construction: true`（构造线/辅助线，不参与拉伸轮廓）；polyline/circle/arc 也可标记构造。
 - sketch 新增 `holes`：孔位可用 `intersection:[lineA,lineB]` 由两条辅助线交点给出，不必手算坐标。实测 80×60×5 板 4×Ø6 孔体积 23434.513 mm³（误差 0）。
 - `cadw_assembly` 新增 `hole` 选择器：按零件局部坐标 + 半径找圆柱孔壁，映射到装配体上下文做同心配合（`MateConcentric`）。
 - 修复动态分派下圆柱面选择：`GetSurface`/`IsCylinder`/`CylinderParams` 是属性；圆柱面实体必须用 `Select4` 才能进入选择集。
 - 实机：11 零件高保真 LeARM 复刻（框形连杆 + 关节孔 + 舵机盒），包围盒 160×460×300 mm；7 个同心关节配合创建成功。
+
+### 已打开窗口管理（cadw_session）
+- `list` / `status` 默认只列可见窗口：1-based 窗口序号、`active`、`saved`；隐藏/参考文档只给
+  `hidden_count`，`include_hidden:true` 才列进 `documents[]`（大装配体可能有几十个隐藏引用，默认不刷屏）。
+  另返回 `document_count` / `window_count` / `dirty_count` 与人读摘要。
+- `close` 支持 `doc` / `docs` / `indexes` 批量关闭；新增 `close_others`（`keep` 必填）与更安全的 `close_all`。
+- 未保存文档默认 `CONFIRM_REQUIRED`；`confirm:true` 走 `QuitDoc` 明确丢弃（不弹保存框），
+  `save_unsaved:true` 先保存再关（无磁盘路径报 `SAVE_FAILED`）。
+- 默认只动 `Frame.ModelWindows` 可见窗口；隐藏/参考文档需 `include_hidden:true`，避免装配体丢引用。
+- `dry_run:true` 预览计划；关闭后轮询 `GetDocuments` 复核，未消失报 `CLOSE_FAILED`，部分失败 `partial:true`。
+- 附着修复：SW2024 偶发 `GetActiveObject` 返回 `MK_E_UNAVAILABLE`（ROT 未注册），改为先枚举
+  `SLDWORKS.exe` 进程、确认已运行后用 `Dispatch` 回退；list/status 仍然只附着不拉起。
+
+### 窗口管理验证
+- 离线 `test/session_cases.py`：47 例（窗口清单、批量关闭、脏文档、隐藏文档、dry-run、保存失败）。
+- 实机 `test/live_windows.py`：18/18（清单、脏文档拒绝/丢弃、CloseDoc/QuitDoc、批量关闭、清理）。
+- `python test/run_all.py` → 5 项全绿（JS 11 例、common 18 例、session 47 例、图校验 37 例、文件审查）。
 
 ## 0.2.1 (2026-11-13) · 装配坐标语义
 

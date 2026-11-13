@@ -67,6 +67,7 @@
     "test:python": "python test/run_all.py --python-only",
     "test:live": "python test/live_smoke.py",
     "verify:installed": "node test/verify_installed.mjs",
-    "test:live:advanced": "python test/live_advanced.py"
+    "test:live:advanced": "python test/live_advanced.py",
+    "test:live:windows": "python test/live_windows.py"
   }
 }
