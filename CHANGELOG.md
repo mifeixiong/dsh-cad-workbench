@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0 (2026-11-13) · 扫掠 / 阵列 / 装配
+
+### 新增 Feature Graph 节点
+- `sweep`：轮廓草图 mark=1 + 路径草图 mark=4，调用 InsertProtrusionSwept4；轮廓必须闭合，路径允许开放折线（2+ 点）。实机 Ø10 × 60 体积 4712.39 mm³。
+- `linear_pattern`：方向边 mark=1 + 种子特征 mark=4，FeatureLinearPattern5；支持 count/spacing/count2/spacing2/flip。实机 4 孔体积 92858.41 mm³。
+- `circular_pattern`：轴边 mark=1 + 种子特征 mark=4，FeatureCircularPattern5；支持 count/angle/equal_spacing/flip。实机 5 孔体积 92073.01 mm³。
+- 草图闭合校验从「sketch 节点」推迟到「使用处」，sweep 路径草图可以是开放折线。
+
+### 新工具 `cadw_assembly`
+- new / insert / mate / fix / list；AssemblyDoc.AddComponent5 插入零部件（mm），平面配合通过 Component2.GetCorresponding + AddMate5（coincident/distance/parallel/perpendicular/tangent/angle），MateGroup 子特征枚举配合。
+- 实机：40×40 板 + Ø10 销，装配、重合配合（重合1）、固定/浮动、保存全通过。
+
+### 验证
+- 离线 4 套全绿（graph 35 例，含 sweep/pattern 正反例）。
+- 实机 `test/live_advanced.py`：11/11 PASS（扫掠/线性/圆周/装配/配合/保存）。
+- 原 smoke 31/31、回归 10/10 保持。
 ## 0.1.2 (2026-11-13) · 收窄平台承诺
 
 - CI 只保留 Windows（插件依赖 SolidWorks COM；Ubuntu 只跑离线单测，不能验证产品）。

@@ -13,7 +13,8 @@ import math
 import os
 import sys
 
-SUPPORTED_OPS = ('sketch', 'extrude', 'cut', 'revolve', 'hole', 'fillet', 'chamfer')
+SUPPORTED_OPS = ('sketch', 'extrude', 'cut', 'revolve', 'hole', 'fillet', 'chamfer',
+                 'sweep', 'linear_pattern', 'circular_pattern')
 SUPPORTED_ENTITIES = ('rect', 'circle', 'polygon', 'polyline', 'centerline', 'arc')
 EXPERIMENTAL_ENTITIES = ('arc',)
 
@@ -26,6 +27,9 @@ OP_KEYS = {
     'hole': {'at', 'diameter', 'depth', 'through_all'},
     'fillet': {'radius', 'edges'},
     'chamfer': {'distance', 'edges', 'angle'},
+    'sweep': {'profile', 'path', 'merge', 'type'},
+    'linear_pattern': {'feature', 'direction', 'count', 'spacing', 'count2', 'spacing2', 'flip'},
+    'circular_pattern': {'feature', 'axis', 'count', 'angle', 'equal_spacing', 'flip'},
 }
 ENTITY_KEYS = {
     'rect': {'type', 'center', 'width', 'height'},
@@ -101,6 +105,37 @@ def _keys(obj, allowed, label, node, path):
               hint='未知字段一律拒绝，避免拼错字段名却静默用默认值。')
 
 
+def _integer(value, label, node, path, minimum=None, maximum=None):
+    if isinstance(value, bool) or not isinstance(value, int):
+        _fail('%s 必须是整数' % label, node, path)
+    if minimum is not None and value < minimum:
+        _fail('%s 不能小于 %s' % (label, minimum), node, path)
+    if maximum is not None and value > maximum:
+        _fail('%s 不能大于 %s' % (label, maximum), node, path)
+    return value
+
+
+def _resolve_ref(ref, ids, normalized, index, kinds, label, path):
+    resolved = None
+    if isinstance(ref, int) and not isinstance(ref, bool):
+        resolved = ref if 0 <= ref < index else None
+    elif isinstance(ref, str):
+        resolved = ids.get(ref)
+    if resolved is None or normalized[resolved].get('op') not in kinds:
+        _fail('%s 必须引用前面已定义的 %s 节点（id 或序号）'
+              % (label, '/'.join(kinds)), index, path)
+    return resolved
+
+
+def _pattern_point(node, key, label, index, path):
+    value = node.get(key)
+    if not isinstance(value, dict):
+        _fail('%s 必须是 {"at":[x,y,z]} 或 {"edge":[x,y,z]}' % label, index, path)
+    _keys(value, {'at', 'edge'}, label, index, path)
+    point = value.get('at') if value.get('at') is not None else value.get('edge')
+    return _point3(point, label + '.at', index, path)
+
+
 def _entity(entity, node, index):
     path = 'entities[%d]' % index
     if not isinstance(entity, dict):
@@ -129,12 +164,13 @@ def _entity(entity, node, index):
         return {'type': 'polygon', 'center': center, 'radius': radius, 'sides': sides, 'rotation': rotation}
     if kind == 'polyline':
         points = entity.get('points')
-        if not isinstance(points, list) or len(points) < 3:
-            _fail('polyline.points 至少 3 个点', node, path)
-        parsed = [_point(item, 'points[%d]' % idx, node, path) for idx, item in enumerate(points)]
         closed = entity.get('closed', True)
         if not isinstance(closed, bool):
             _fail('closed 必须是布尔值', node, path)
+        minimum = 3 if closed else 2
+        if not isinstance(points, list) or len(points) < minimum:
+            _fail('polyline.points 至少 %d 个点（closed=%s）' % (minimum, closed), node, path)
+        parsed = [_point(item, 'points[%d]' % idx, node, path) for idx, item in enumerate(points)]
         if closed and parsed[0] != parsed[-1]:
             if math.dist(parsed[0], parsed[-1]) > 1e-6:
                 parsed.append(parsed[0])
@@ -176,6 +212,16 @@ def _profile_points(entity):
         radius = entity['radius']
         return [(cx - radius, cy), (cx + radius, cy), (cx, cy - radius), (cx, cy + radius)]
     return []
+
+
+def _require_closed(sketch_node, index, path, label):
+    entities = sketch_node.get('entities', [])
+    if not any(
+        entity.get('type') in CLOSED_ENTITIES
+        or (entity.get('type') == 'polyline' and entity.get('closed'))
+        for entity in entities
+    ):
+        _fail('%s 的草图缺少闭合轮廓' % label, index, path)
 
 
 def _check_revolve_profile(sketch_node, index, path):
@@ -224,6 +270,7 @@ def validate(graph):
 
     normalized = []
     last_sketch_index = None
+    sketch_indices = []
     ids = {}
     for index, node in enumerate(nodes):
         path = 'nodes[%d]' % index
@@ -265,13 +312,7 @@ def validate(graph):
             if not isinstance(entities, list) or not entities:
                 _fail('sketch.entities 必须是非空数组', index, path)
             parsed_entities = [_entity(entity, index, position) for position, entity in enumerate(entities)]
-            closed = any(
-                entity.get('type') in CLOSED_ENTITIES
-                or (entity.get('type') == 'polyline' and entity.get('closed'))
-                for entity in parsed_entities
-            )
-            if not closed:
-                _fail('草图缺少闭合轮廓（extrude/cut/revolve 需要）', index, path)
+            # 闭合轮廓在使用时校验：sweep 的路径草图允许是开放折线。
             base['entities'] = parsed_entities
             centerline = node.get('centerline')
             if centerline is not None:
@@ -280,6 +321,78 @@ def validate(graph):
                 base['centerline'] = [_point(centerline[0], 'centerline[0]', index, path),
                                       _point(centerline[1], 'centerline[1]', index, path)]
             last_sketch_index = index
+            sketch_indices.append(index)
+
+        elif op == 'sweep':
+            profile_ref = node.get('profile')
+            if profile_ref is None:
+                profile_index = last_sketch_index
+                if profile_index is None:
+                    _fail('sweep 需要 profile 草图（或前面至少一个 sketch）', index, path)
+            else:
+                profile_index = _resolve_ref(profile_ref, ids, normalized, index, ('sketch',), 'profile', path)
+            path_ref = node.get('path')
+            if path_ref is None:
+                others = [item for item in sketch_indices if item != profile_index]
+                if not others:
+                    _fail('sweep 需要 path 草图（或前面至少两个 sketch）', index, path)
+                path_indices = [others[-1]]
+            elif isinstance(path_ref, list):
+                if not path_ref:
+                    _fail('sweep.path 不能是空数组', index, path)
+                path_indices = [
+                    _resolve_ref(item, ids, normalized, index, ('sketch',), 'path', path)
+                    for item in path_ref
+                ]
+            else:
+                path_indices = [_resolve_ref(path_ref, ids, normalized, index, ('sketch',), 'path', path)]
+            _require_closed(normalized[profile_index], index, path, 'sweep.profile')
+            kind = node.get('type', 'boss')
+            if kind != 'boss':
+                _fail('v0.1 只支持 sweep.type="boss"（扫掠切除计划在 v0.3）', index, path)
+            merge = node.get('merge', True)
+            if not isinstance(merge, bool):
+                _fail('sweep.merge 必须是布尔值', index, path)
+            base.update({'profile_index': profile_index, 'path_indices': path_indices,
+                         'merge': merge, 'type': 'boss'})
+            last_sketch_index = None
+
+        elif op == 'linear_pattern':
+            feature_index = _resolve_ref(
+                node.get('feature'), ids, normalized, index,
+                ('extrude', 'cut', 'revolve', 'hole', 'fillet', 'chamfer', 'sweep',
+                 'linear_pattern', 'circular_pattern'), 'feature', path)
+            direction_at = _pattern_point(node, 'direction', 'direction', index, path)
+            count = _integer(node.get('count'), 'count', index, path, minimum=2, maximum=1000)
+            spacing = _number(node.get('spacing'), 'spacing', index, path, minimum=1e-6)
+            count2 = _integer(node.get('count2', 1), 'count2', index, path, minimum=1, maximum=1000)
+            spacing2 = _number(node.get('spacing2', 0.0), 'spacing2', index, path, minimum=0.0)
+            flip = node.get('flip', False)
+            if not isinstance(flip, bool):
+                _fail('flip 必须是布尔值', index, path)
+            base.update({'feature_index': feature_index, 'direction_at': direction_at,
+                         'count': count, 'spacing': spacing, 'count2': count2,
+                         'spacing2': spacing2, 'flip': flip})
+            last_sketch_index = None
+
+        elif op == 'circular_pattern':
+            feature_index = _resolve_ref(
+                node.get('feature'), ids, normalized, index,
+                ('extrude', 'cut', 'revolve', 'hole', 'fillet', 'chamfer', 'sweep',
+                 'linear_pattern', 'circular_pattern'), 'feature', path)
+            axis_at = _pattern_point(node, 'axis', 'axis', index, path)
+            count = _integer(node.get('count'), 'count', index, path, minimum=2, maximum=1000)
+            angle = _number(node.get('angle', 360), 'angle', index, path, minimum=0.1, maximum=360)
+            equal_spacing = node.get('equal_spacing', True)
+            if not isinstance(equal_spacing, bool):
+                _fail('equal_spacing 必须是布尔值', index, path)
+            flip = node.get('flip', False)
+            if not isinstance(flip, bool):
+                _fail('flip 必须是布尔值', index, path)
+            base.update({'feature_index': feature_index, 'axis_at': axis_at,
+                         'count': count, 'angle': angle,
+                         'equal_spacing': equal_spacing, 'flip': flip})
+            last_sketch_index = None
 
         elif op in ('extrude', 'cut'):
             sketch_ref = node.get('sketch')
@@ -295,6 +408,7 @@ def validate(graph):
                 sketch_index = last_sketch_index
             if sketch_index is None:
                 _fail('%s 前必须有 sketch 节点' % op, index, path)
+            _require_closed(normalized[sketch_index], index, path, op)
             base['sketch_index'] = sketch_index
             if op == 'extrude':
                 depth = _number(node.get('depth'), 'depth', index, path, minimum=1e-6)
@@ -336,6 +450,7 @@ def validate(graph):
             if sketch_index is None:
                 _fail('revolve 前必须有 sketch 节点', index, path)
             sketch_node = normalized[sketch_index]
+            _require_closed(sketch_node, index, path, 'revolve')
             axis = node.get('axis', 'centerline')
             if axis != 'centerline':
                 _fail('v0.1 只支持 axis="centerline"（在草图画中心线）', index, path)

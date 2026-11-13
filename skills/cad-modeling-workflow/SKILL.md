@@ -66,9 +66,21 @@ description: "SolidWorks 机械 CAD 总控流程：需求→参数表→批准�
    **整张图一次提交**（不要把 sketch/extrude/hole 拆成多次 cadw_model：每次多 1.5–2 s 进程+附着+重建）。
    - 失败会自动回滚；看 `rollback.done` 与 `error.details.created`。
    - `verification.status` 必须是 `verified`；`mismatch` 就改图重来，不要嘴硬。
-4. 需要"看得见"时传 `visual:true`（慢，每步置前）。
+4. 扫掠：先画路径草图（开放 polyline 可只有 2 点）与闭合轮廓草图，再 `{"op":"sweep","profile":"轮廓id","path":"路径id"}`。
+5. 阵列：先建种子特征（孔/凸台等）并记 id；线性阵列给方向边上一点 `{"at":[x,y,z]}`，圆周阵列给轴边/圆边上一点。
+   方向/轴的符号取决于所选边的朝向；结果不符时改 `flip` 或换一条边。
+6. 需要"看得见"时传 `visual:true`（慢，每步置前）。
 
 **一次只操作一个文档**。`doc` 令牌变了（Save As 后 doc_id 会变）就重新取。
+
+## 4.5 装配（cadw_assembly）
+
+1. `cadw_assembly({action:"new"})` 新建装配体（或 `cadw_session new_assembly`）。
+2. `insert`：`[{path,x,y,z,fixed}]`（mm）。零件必须先保存到磁盘；脚本会自动打开引用零件以便配合。
+3. `mate`：`a/b` 用 `{component:"plate-1", plane:"top"}`；type 用 coincident/distance/parallel/perpendicular/tangent/angle。
+   固定件建议先 `fixed:true`；运动件不要三面锁死。
+4. 验证：`list` 看组件与配合；`mate_count` 必须增加；保存用 `cadw_session save_as`。
+5. 干涉/运动仿真 v0.2 不支持，如实说明。
 
 ## 5. 自检（必做）
 

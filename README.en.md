@@ -1,7 +1,7 @@
 # dsh-cad-workbench
 
 **Mechanical CAD workbench** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness):
-drive a local SOLIDWORKS installation through nine deterministic `cadw_*` tools.
+drive a local SOLIDWORKS installation through ten deterministic `cadw_*` tools.
 
 The model never writes COM calls. It submits a declarative **Feature Graph** (units: mm);
 the plugin validates it, builds it inside an undo-guarded transaction, measures the result,
@@ -20,6 +20,7 @@ and records the evidence in a job ledger.
 | `cadw_export` | STEP/IGES/STL/3MF/PDF/PNG with bytes + sha256 |
 | `cadw_drawing` | First-angle drawing with PDF/DXF/DWG export |
 | `cadw_review` | Read-only DXF (7 checks) / STL (watertight) / STEP (schema, unit, heuristic bbox) review |
+| `cadw_assembly` | Assembly: insert components, plane mates, fix/float, list |
 | `cadw_job` | Immutable job ledger and delivery verdict |
 
 Bundled skills: `cad-modeling-workflow`, `solidworks-com`, `cad-feature-graph`, `cad-drawing-gb`.
@@ -54,10 +55,10 @@ exports no longer accept a stale pre-existing file as success.
 
 Offline: `python test/run_all.py` — JS contract tests plus Python graph/review cases.
 
-## Limits (v0.1)
+## Limits (v0.2)
 
-No assemblies/mates, no FreeCAD/CadQuery backend, no shell/patterns/slot/rounded-rect,
-no sweep/loft, no web viewer, no CAD-mode preset. Unsupported requests fail loudly.
+No interference checking/motion, no FreeCAD/CadQuery backend, no shell/slot/rounded-rect,
+no swept cut/loft, no web viewer, no CAD-mode preset. Unsupported requests fail loudly.
 
 ## License
 

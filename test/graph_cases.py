@@ -79,7 +79,25 @@ CASES = [
         {'op': 'sketch', 'entities': [
             {'type': 'polyline', 'points': [[0, 0], [5, 0], [5, 5]], 'closed': False},
         ]},
+        {'op': 'extrude', 'depth': 2},
     ]}, False, '闭合'),
+    ('open_path_sketch_ok', {'units': 'mm', 'nodes': [
+        {'op': 'sketch', 'entities': [
+            {'type': 'polyline', 'points': [[0, 0], [10, 0]], 'closed': False},
+        ]},
+    ]}, True, None),
+    ('sweep_ok', {'units': 'mm', 'nodes': [
+        {'op': 'sketch', 'id': 'path', 'entities': [
+            {'type': 'polyline', 'points': [[0, 0], [10, 0]], 'closed': False},
+        ]},
+        {'op': 'sketch', 'id': 'profile', 'entities': [{'type': 'circle', 'radius': 2}]},
+        {'op': 'sweep', 'profile': 'profile', 'path': 'path'},
+    ]}, True, None),
+    ('pattern_bad_ref', {'units': 'mm', 'nodes': [
+        {'op': 'sketch', 'entities': [rect()]},
+        {'op': 'extrude', 'depth': 2},
+        {'op': 'linear_pattern', 'feature': 'nope', 'direction': {'at': [0, 10, 0]}, 'count': 3, 'spacing': 5},
+    ]}, False, '引用'),
     ('extrude_before_sketch', {'units': 'mm', 'nodes': [{'op': 'extrude', 'depth': 5}]}, False, 'sketch'),
     ('bad_sketch_ref', {'units': 'mm', 'nodes': [
         {'op': 'sketch', 'id': 'a', 'entities': [rect()]},
@@ -134,10 +152,11 @@ CASES = [
         {'op': 'extrude', 'depth': 2},
         {'op': 'chamfer', 'distance': 1, 'edges': [[10, 10, 2]]},
     ]}, True, None),
-    ('arc_ok', {'units': 'mm', 'nodes': [
+    ('arc_open_not_extrudable', {'units': 'mm', 'nodes': [
         {'op': 'sketch', 'entities': [
             {'type': 'arc', 'center': [0, 0], 'radius': 5, 'start_deg': 0, 'end_deg': 180},
         ]},
+        {'op': 'extrude', 'depth': 2},
     ]}, False, '闭合'),
 ]
 

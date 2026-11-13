@@ -19,6 +19,9 @@ description: "Feature Graph DSL 参考：节点字段、草图实体、引用规
 | `hole` | `at`、`diameter` | `through_all`（默认 true）、`depth` | 面上打孔（糖：草图+切除） |
 | `fillet` | `radius`、`edges` | — | 恒定半径圆角 |
 | `chamfer` | `distance`、`edges` | `angle`（默认 45） | 角度-距离倒角 |
+| `sweep` | 轮廓草图闭合 | `profile`、`path`（草图 id/列表）、`merge` | 扫掠凸台（路径可开放折线） |
+| `linear_pattern` | `feature`、`direction`、`count`、`spacing` | `count2`、`spacing2`、`flip` | 线性阵列（方向为边上一点） |
+| `circular_pattern` | `feature`、`axis`、`count` | `angle`、`equal_spacing`、`flip` | 圆周阵列（轴为圆边/直边上一点） |
 
 `sketch` 可写 `id`；后续节点用 `sketch:"<id>"` 引用。`edges` 可以是 `"all"` 或
 `[{at:[x,y,z], tol?}]`（毫米世界坐标，点在边上即可）。
@@ -100,7 +103,18 @@ description: "Feature Graph DSL 参考：节点字段、草图实体、引用规
 | `BUILD_FAILED` | SolidWorks 执行失败；`details.cause` 是根因，`details.node_index` 是节点序号 |
 | `PLAN_MISMATCH` | 实测与 `expect` 不符（JS 侧判定，容差 max(1 mm, 2%)） |
 
-## v0.1 不支持（会明确报 UNSUPPORTED / GRAPH_INVALID）
+## 扫掠 / 阵列示例
 
-`shell`、`linear_pattern`、`circular_pattern`、`slot`、`rounded_rect`、偏移基准面、
-装配配合、扫掠/放样。不要硬拼；用多个 rect/circle/polyline 表达，或如实说明。
+```json
+{"op":"sketch","id":"path","plane":"front","entities":[
+  {"type":"polyline","closed":false,"points":[[0,0],[60,0]]}]}
+{"op":"sketch","id":"profile","plane":"right","entities":[{"type":"circle","radius":5}]}
+{"op":"sweep","profile":"profile","path":"path"}
+{"op":"hole","id":"h1","at":[30,20,10],"diameter":10}
+{"op":"linear_pattern","feature":"h1","direction":{"at":[0,40,10]},"count":4,"spacing":20}
+```
+
+## 不支持（会明确报 UNSUPPORTED / GRAPH_INVALID）
+
+`shell`、`slot`、`rounded_rect`、偏移基准面、扫掠切除、放样、`cut.both_directions`、
+装配干涉/运动。不要硬拼；用多个 rect/circle/polyline 表达，或如实说明。

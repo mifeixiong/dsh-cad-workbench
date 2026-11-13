@@ -52,6 +52,7 @@ cadw_job.finish 只在这三种状态上给 delivered/partial/failed；partial �
 | 实测 | 与 expect 不符 | PLAN_MISMATCH，列出逐轴差值 |
 | 导出 | 缺转换器/授权 | UNSUPPORTED，逐格式报告，不伪造文件 |
 | 并发 | 锁被占 | DOC_BUSY，带持锁 pid/工具名 |
+| 装配 | 组件缺基准面/配合过定义 | UNSUPPORTED/BUILD_FAILED + AddMate5 error_status，不静默 |
 
 ## 目录
 
@@ -70,6 +71,7 @@ cadw_job.finish 只在这三种状态上给 delivered/partial/failed；partial �
 	scripts/sw_capture.py    视图 + 拼图 + 像素统计
 	scripts/sw_export.py     多格式导出
 	scripts/sw_drawing.py    工程图
+	scripts/sw_assembly.py   装配体（插入/配合/固定/列表）
 	scripts/cad_review.py    DXF/STL/STEP 审查
 	scripts/cad_doctor.py    环境能力
 	rules/dxf_rules.json     可覆盖的图纸规则
@@ -77,6 +79,6 @@ cadw_job.finish 只在这三种状态上给 delivered/partial/failed；partial �
 
 ## Roadmap
 
-- v0.2：装配体插入 + 配合 + 干涉检查；shell/pattern 节点；偏移基准面；slot/rounded_rect。
-- v0.3：可选 FreeCAD/CadQuery 后端（能力路由）；PDF 图纸视觉复核。
-- v0.4：CAD 模式预设（限制工具面）；Web 端只读查看器。
+- v0.2 ✅：sweep / linear_pattern / circular_pattern；cadw_assembly（插入 + 平面配合 + 固定）。
+- v0.3：装配干涉检查与运动；shell 节点；偏移基准面；slot/rounded_rect；扫掠切除。
+- v0.4：可选 FreeCAD/CadQuery 后端（能力路由）；CAD 模式预设；Web 端只读查看器。

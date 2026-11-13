@@ -96,7 +96,7 @@ const ctx = {
 apply(ctx)
 
 console.log('安装副本：' + target)
-check('tool.count', definitions.size === 9, '实际 ' + definitions.size)
+check('tool.count', definitions.size === 10, '实际 ' + definitions.size)
 const skills = skillFactory ? await skillFactory().list() : []
 check('skill.count', skills.length === 4, '实际 ' + skills.length)
 

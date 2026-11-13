@@ -64,3 +64,14 @@
 	python test/live_smoke.py --workspace E:\code\_cad_verify\live2
 
 审计报告（仓库外）：`E:\code\_cad_verify\reviews\audit-static.md`、`audit-live.md`、`efficiency.md`。
+## 高级特征与装配（v0.2.0）
+
+| 项 | 实测 |
+|---|---|
+| 扫掠 Ø10 × 60 路径 | 体积 4712.39 mm³（π·5²·60 = 4712.39） |
+| 线性阵列 4 孔 / 20 mm | 体积 92858.41 mm³（96000 − 4×785.40） |
+| 圆周阵列 4 份 / 360° | 体积 92073.01 mm³（96000 − 5×785.40） |
+| 装配：40×40 板 + Ø10 销 | 2 组件，重合配合「重合1」，mate_count=1 |
+| 装配固定/浮动 | 通过；保存/重开可读 |
+
+命令：`python test/live_advanced.py --workspace E:\code\_cad_verify\live_adv` → **11/11 PASS**。

@@ -124,6 +124,27 @@ def execute_node(model, node, built):
         except common.CadError:
             feat = common.cut(model, name, node.get('depth'), through=node.get('through_all', True), flip=True)
         feature = {'name': str(common._call_or_value(feat, 'Name')), 'type': 'hole'}
+    elif op == 'sweep':
+        profile_name = built[node['profile_index']]['sketch_name']
+        path_names = [built[index]['sketch_name'] for index in node['path_indices']]
+        if not profile_name or not all(path_names):
+            raise common.CadError('BUILD_FAILED', '扫掠的轮廓/路径草图没有建成功。')
+        feat = common.sweep(model, profile_name, path_names, merge=node.get('merge', True))
+        feature = {'name': str(common._call_or_value(feat, 'Name')), 'type': 'sweep'}
+    elif op == 'linear_pattern':
+        seed = built[node['feature_index']]['feature_name']
+        feat = common.linear_pattern(model, seed, node['direction_at'], node['count'],
+                                     node['spacing'], count2=node.get('count2', 1),
+                                     spacing2_mm=node.get('spacing2', 0.0),
+                                     flip=node.get('flip', False))
+        feature = {'name': str(common._call_or_value(feat, 'Name')), 'type': 'linear_pattern'}
+    elif op == 'circular_pattern':
+        seed = built[node['feature_index']]['feature_name']
+        feat = common.circular_pattern(model, seed, node['axis_at'], node['count'],
+                                       angle_deg=node.get('angle', 360),
+                                       equal_spacing=node.get('equal_spacing', True),
+                                       flip=node.get('flip', False))
+        feature = {'name': str(common._call_or_value(feat, 'Name')), 'type': 'circular_pattern'}
     elif op == 'fillet':
         if node.get('edges') == 'all':
             common.select_all_edges(model)
@@ -309,6 +330,17 @@ def _plan_text(graph):
         elif node['op'] in ('fillet', 'chamfer'):
             lines.append('%d. %s %s mm' % (index + 1, '圆角' if node['op'] == 'fillet' else '倒角',
                                            node.get('radius') or node.get('distance')))
+        elif node['op'] == 'sweep':
+            lines.append('%d. 扫掠（轮廓草图 %s，路径 %s）' % (
+                index + 1, node.get('profile_index'), node.get('path_indices')))
+        elif node['op'] == 'linear_pattern':
+            lines.append('%d. 线性阵列：%s × %s，间距 %s mm，方向 %s' % (
+                index + 1, node.get('feature_index'), node.get('count'),
+                node.get('spacing'), node.get('direction_at')))
+        elif node['op'] == 'circular_pattern':
+            lines.append('%d. 圆周阵列：%s × %s，%s°，轴 %s' % (
+                index + 1, node.get('feature_index'), node.get('count'),
+                node.get('angle'), node.get('axis_at')))
     return lines
 
 

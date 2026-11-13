@@ -17,7 +17,7 @@
 2. **实测优先**：包围盒/体积/特征数/视图像素统计/文件大小与 sha256，任何"完成"都有证据；
 3. **边界纪律**：文档身份令牌、跨进程锁、精确回滚、危险动作确认、缺能力就报 UNSUPPORTED。
 
-## 工具（9 个，前缀 cadw_）
+## 工具（10 个，前缀 cadw_）
 
 | 工具 | 作用 |
 |---|---|
@@ -29,6 +29,7 @@
 | `cadw_export` | step/iges/stl/3mf/pdf/png；逐格式复核 bytes+sha256 |
 | `cadw_drawing` | 零件/装配体出工程图：第一角法 4 视图、模型尺寸、pdf/dxf/dwg |
 | `cadw_review` | 只读审查 DXF（11 项检查）/STL（三角数/退化/水密）/STEP（schema/单位/启发式包围盒） |
+| `cadw_assembly` | 装配体：new / insert（mm 定位、固定）/ mate（重合/距离/平行/垂直/相切/角度，组件基准面）/ fix / list |
 | `cadw_job` | 作业台账：start/record/verify/finish/get/list；交付结论 delivered/partial/failed + 信任等级 |
 
 随包 4 个技能：`cad-modeling-workflow`（总控流程与硬关卡）、`solidworks-com`（API 事实与坑）、
@@ -104,17 +105,17 @@ cadw_doctor
 - 失败图精确回滚（特征数 23 → 23，删除 凸台-拉伸2/草图3）；
 - 过期令牌 `DOC_NOT_FOUND`；锁竞争 `DOC_BUSY`（等待 2.1 s）。
 
-离线测试：`python test/run_all.py` → 4 项全绿（JS 10 例、common 14 例、图校验 33 例、文件审查含 MTEXT）。
+离线测试：`python test/run_all.py` → 4 项全绿（JS 10 例、common 14 例、图校验 35 例、文件审查含 MTEXT）。
 实机回归：`python test/live_regressions.py` → 10/10（Top 面孔位、倒角角度、闭合 polyline、回滚、open/save）。
+高级实机：`python test/live_advanced.py` → 11/11（扫掠、线性/圆周阵列、装配插入/配合/固定/保存）。
 
-## 能力边界（v0.1）
+## 能力边界（v0.2）
 
 支持：零件建模（草图/拉伸/切除/旋转/孔/圆角/倒角）、测量、截图、导出、工程图、DXF/STEP/STL 审查、作业台账。
 
-**不支持**（会明确报错，不静默降级）：装配体配合与干涉检查、FreeCAD/CadQuery 后端、`shell`/
-`linear_pattern`/`circular_pattern`、`slot`/`rounded_rect`、偏移基准面、扫掠/放样、
-`cut.both_directions`（请用两次 cut）、Web UI 3D 查看器、CAD 模式预设。
-`cut` 盲切必须显式给 `depth`；`extrude.flip` 已支持。见 [docs/design.md](docs/design.md#roadmap)。
+**不支持**（会明确报错，不静默降级）：装配干涉检查/运动仿真、FreeCAD/CadQuery 后端、`shell`/
+`slot`/`rounded_rect`、偏移基准面、扫掠切除/放样、`cut.both_directions`、Web UI 3D 查看器、
+CAD 模式预设。`cut` 盲切必须显式给 `depth`；`extrude.flip` 已支持。见 [docs/design.md](docs/design.md#roadmap)。
 
 ## 环境要求
 

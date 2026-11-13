@@ -27,7 +27,7 @@ const { contentFrom } = await import(new URL('lib/images.js', root))
 
 const EXPECTED_TOOLS = [
   'cadw_doctor', 'cadw_session', 'cadw_model', 'cadw_measure', 'cadw_capture',
-  'cadw_export', 'cadw_drawing', 'cadw_review', 'cadw_job',
+  'cadw_export', 'cadw_drawing', 'cadw_review', 'cadw_assembly', 'cadw_job',
 ]
 
 function mockContext() {

@@ -87,6 +87,19 @@ description: "SolidWorks COM 自动化事实与坑：后期绑定、模板探测
 - 未保存的新图纸用 `GetFirstView` 遍历不到视图；先保存、再按路径取新指针。
 - `InsertModelAnnotations3` 返回 None；用 `view.GetAnnotationCount` 数注解。
 
+## 扫掠 / 阵列 / 装配（v0.2 实测）
+
+- 扫掠：`InsertProtrusionSwept4(False,False,0,False,False,0,0,False,0,0,0,0,True,True,True,0,False,False,0,0)`；
+  轮廓草图 mark=1，路径草图 mark=4；轮廓闭合，路径可开放。
+- 线性阵列：`FeatureLinearPattern5(num1,spacing1,1,0,flip,False,'','',False,...)`；
+  方向边 mark=1，种子特征 mark=4（`SelectByID2(name,'BODYFEATURE',...,4,...)`）。
+- 圆周阵列：`FeatureCircularPattern5(count,radians(angle),flip,'',True,equal,...)`；轴边 mark=1，种子 mark=4。
+- 装配插入：`AssemblyDoc.AddComponent5(path,0,'',False,'',x,y,z)`（米）。
+- 配合：组件基准面经 `Component2.GetCorresponding(feature)` 映射为装配实体，两个 `Select2(append,1)` 后
+  `AddMate5(type,align,flip,dist,dist,dist,0,0,angleRad,angleRad,angleRad,False,lock,0,errors)`；
+  error_status 1=NoError。组件选择/固定用 `Component2.Select2(False,0)` + `FixComponent()`。
+- 配合列表：`MateGroup` 的 `GetFirstSubFeature` / `GetNextSubFeature` 链（动态分派下 `GetMates` 不可用）。
+
 ## 回滚
 
 - `EditUndo2(1)` 有时前几次是空操作；不要无界循环，容易把用户之前的特征也撤掉。

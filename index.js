@@ -235,7 +235,7 @@ function registerTools(ctx) {
     name: 'cadw_model',
     description:
       '按声明式 Feature Graph 在指定文档上建模（单位 mm）。节点：sketch（rect/circle/slot/rounded_rect/polygon/polyline/arc/centerline）、' +
-      'extrude、cut、revolve、hole、fillet、chamfer。先做计划期校验（dry_run 可只看校验与计划），' +
+      'extrude、cut、revolve、hole、fillet、chamfer、sweep、linear_pattern、circular_pattern。先做计划期校验（dry_run 可只看校验与计划），' +
       '再在 Undo 事务内逐节点执行；失败自动回滚并复验特征数。传 expect（包围盒/体积/特征数）时，' +
       '建完按实测逐轴比对，容差 max(1 mm, 2%)，不符返回 PLAN_MISMATCH。',
     parameters: {
@@ -576,7 +576,61 @@ function registerTools(ctx) {
     },
   }))
 
-  // 9) 作业台账
+  // 9) 装配体
+  ctx.tools.register(defineTool({
+    name: 'cadw_assembly',
+    description:
+      '装配体：new 新建；insert 插入零部件（mm 定位、可 fixed）；mate 在装配体上下文创建配合' +
+      '（coincident/distance/parallel/perpendicular/tangent/angle；选择器用组件的 front/top/right 基准面）；' +
+      'fix 固定/浮动；list 列出零部件与配合。组件路径只读；配合失败返回 AddMate5 的错误码。',
+    parameters: {
+      action: { type: 'string', required: true, description: 'new | insert | mate | fix | list' },
+      doc: { type: 'string', description: '装配体文档令牌 doc_id（new 之外必填）' },
+      components: { type: 'json', description: 'insert：[{path, x?, y?, z?, fixed?}]，位置单位 mm' },
+      mates: { type: 'json', description: 'mate：[{type, a:{component,plane}, b:{component,plane}, distance?, angle?, align?, flip?, lock_rotation?}]' },
+      component: { type: 'string', description: 'fix：组件名字或序号' },
+      fixed: { type: 'boolean', description: 'fix：true 固定 / false 浮动（默认 true）' },
+      workspace: { type: 'string', description: '工作区根目录（相对组件路径按它解析）' },
+    },
+    timeoutMs: 600000,
+    output: { schema: OUTPUT_SCHEMA, render: renderResult },
+    async execute(args, exec) {
+      const workspace = workspaceOf(args, exec, ctx)
+      const action = String(args.action ?? '')
+      if (action === 'insert' && !Array.isArray(args.components)) {
+        return fail('BAD_ARGS', 'insert 需要 components 数组')
+      }
+      if (action === 'mate' && !Array.isArray(args.mates)) {
+        return fail('BAD_ARGS', 'mate 需要 mates 数组')
+      }
+      const spec = {
+        workspace,
+        action,
+        doc: args.doc ?? null,
+        components: args.components ?? null,
+        mates: args.mates ?? null,
+        component: args.component ?? null,
+        fixed: args.fixed !== false,
+      }
+      const result = await invoke('sw_assembly.py', spec, { requirement: 'com', timeoutMs: 580000 })
+      if (result.ok === false) return result
+      const lines = []
+      if (result.doc) lines.push('文档：' + result.doc.title + '（doc_id=' + result.doc.doc_id + '）')
+      if (Array.isArray(result.components) && result.components.length) {
+        lines.push('零部件：' + result.components.map((item) => item.name + (item.fixed ? '（固定）' : '')).join('、'))
+      }
+      if (Array.isArray(result.mates) && result.mates.length) {
+        lines.push('配合：' + result.mates.map((item) => (item.name || item.type) + ' ' +
+          (item.a || '') + '↔' + (item.b || '')).join('；'))
+      }
+      if (result.mate_count !== undefined) lines.push('配合总数：' + result.mate_count)
+      if (result.component_count !== undefined) lines.push('组件总数：' + result.component_count)
+      result.summary = lines.join('\n') || '装配体操作完成'
+      return result
+    },
+  }))
+
+  // 10) 作业台账
   ctx.tools.register(defineTool({
     name: 'cadw_job',
     description:

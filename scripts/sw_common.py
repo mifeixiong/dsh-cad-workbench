@@ -441,6 +441,15 @@ def attach(launch=False):
             ('无法启动/连接 SolidWorks（SldWorks.Application 未注册或安装损坏）。'),
             {'error': str(error)},
         )
+    # 某些机器上装过 makepy/gen_py 缓存时，GetActiveObject 会返回带类型库的包装，
+    # 它不接受 VARIANT byref（OpenDoc6/AddMate5 会报类型错误）。这里强制回动态分派。
+    module = type(app).__module__ or ''
+    if 'gen_py' in module:
+        try:
+            from win32com.client import dynamic as _dynamic
+            app = _dynamic.Dispatch(app._oleobj_)
+        except Exception:
+            pass
     try:
         app.Visible = True
     except Exception:
@@ -904,6 +913,86 @@ def cut(model, sketch_name, depth_mm=None, through=False, flip=False):
     )
     if feature is None:
         raise CadError('BUILD_FAILED', '切除失败（FeatureCut3 返回 None）。')
+    return feature
+
+
+def select_edge_at(model, point_mm, mark=0, append=False):
+    """按世界坐标选边（圆边/直线边都可；用于阵列方向/轴）。"""
+    empty = _empty_variant()
+    x, y, z = [float(value) for value in point_mm]
+    selected = model.Extension.SelectByID2('', 'EDGE', x * MM, y * MM, z * MM, bool(append), int(mark), empty, 0)
+    if not selected:
+        raise CadError('BUILD_FAILED', '在 (%s, %s, %s) mm 处选不中边（阵列方向/轴）。' % (x, y, z))
+    return True
+
+
+def select_seed_feature(model, feature_name, mark=4, append=True):
+    empty = _empty_variant()
+    for type_name in ('BODYFEATURE', 'FEATURE', 'CUT'):
+        try:
+            selected = model.Extension.SelectByID2(str(feature_name), type_name, 0, 0, 0,
+                                                   bool(append), int(mark), empty, 0)
+        except Exception:
+            selected = False
+        if selected:
+            return True
+    raise CadError('BUILD_FAILED', '选不中阵列种子特征 %s（特征名可能已变）。' % feature_name)
+
+
+def sweep(model, profile_name, path_names, merge=True):
+    """扫掠凸台：profile 草图 mark=1，path 草图（可多段）mark=4。"""
+    empty = _empty_variant()
+    model.ClearSelection2(True)
+    if not model.Extension.SelectByID2(str(profile_name), 'SKETCH', 0, 0, 0, False, 1, empty, 0):
+        raise CadError('BUILD_FAILED', '选不中扫掠轮廓草图 %s。' % profile_name)
+    for index, name in enumerate(path_names or []):
+        if not model.Extension.SelectByID2(str(name), 'SKETCH', 0, 0, 0, True, 4, empty, 0):
+            raise CadError('BUILD_FAILED', '选不中扫掠路径草图 %s。' % name)
+    feature = retry_busy(
+        model.FeatureManager.InsertProtrusionSwept4,
+        False, False, 0, False, False, 0, 0, False, 0.0, 0.0, 0, 0,
+        bool(merge), True, True, 0.0, False, False, 0.0, 0,
+    )
+    if feature is None:
+        raise CadError('BUILD_FAILED', '扫掠失败（InsertProtrusionSwept4 返回 None）。')
+    return feature
+
+
+def linear_pattern(model, feature_name, direction_at, count, spacing_mm,
+                   count2=1, spacing2_mm=0.0, flip=False, geometry_pattern=False):
+    """线性阵列：方向边 mark=1，种子特征 mark=4。"""
+    model.ClearSelection2(True)
+    select_edge_at(model, direction_at, mark=1, append=False)
+    select_seed_feature(model, feature_name, mark=4, append=True)
+    feature = retry_busy(
+        model.FeatureManager.FeatureLinearPattern5,
+        int(count), float(spacing_mm) * MM, int(count2), float(spacing2_mm) * MM,
+        bool(flip), False, '', '',
+        bool(geometry_pattern), False,
+        False, False, False, False, False, False, False, False,
+        0.0, 0.0, False, False,
+    )
+    if feature is None:
+        raise CadError('BUILD_FAILED', '线性阵列失败（FeatureLinearPattern5 返回 None）。')
+    return feature
+
+
+def circular_pattern(model, feature_name, axis_at, count, angle_deg=360.0,
+                     equal_spacing=True, flip=False, geometry_pattern=True):
+    """圆周阵列：轴边 mark=1，种子特征 mark=4。"""
+    import math as _math
+    model.ClearSelection2(True)
+    select_edge_at(model, axis_at, mark=1, append=False)
+    select_seed_feature(model, feature_name, mark=4, append=True)
+    angle = _math.radians(float(angle_deg))
+    feature = retry_busy(
+        model.FeatureManager.FeatureCircularPattern5,
+        int(count), angle, bool(flip), '',
+        bool(geometry_pattern), bool(equal_spacing), False, False,
+        False, False, int(count), angle, '', bool(equal_spacing),
+    )
+    if feature is None:
+        raise CadError('BUILD_FAILED', '圆周阵列失败（FeatureCircularPattern5 返回 None）。')
     return feature
 
 
