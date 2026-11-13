@@ -100,6 +100,14 @@ description: "SolidWorks COM 自动化事实与坑：后期绑定、模板探测
   error_status 1=NoError。组件选择/固定用 `Component2.Select2(False,0)` + `FixComponent()`。
 - 配合列表：`MateGroup` 的 `GetFirstSubFeature` / `GetNextSubFeature` 链（动态分派下 `GetMates` 不可用）。
 
+## 构造线与圆柱面（v0.3 实测）
+
+- 构造线：`SketchManager.CreateLine(...)` 后设 `segment.ConstructionGeometry = True`；不参与拉伸轮廓。
+- 孔位可由辅助线交点给出；`CreateCircleByRadius` 创建孔轮廓。
+- 动态分派下 `IFace2.GetSurface`、`ISurface.IsCylinder`、`ISurface.CylinderParams` 都是**属性**，不能加括号调用。
+- 圆柱面映射实体 `Component2.GetCorresponding(face)` 可用，但 `Select2` 返回 True 却选择集为空；必须 `Select4(append, VARIANT(None))` 才真正选中。
+- 同心配合：两个孔壁实体各 `Select4` 后 `AddMate5(1,0,False,0,0,0,0,0,0,0,0,False,False,0,errors)`。
+
 ## 回滚
 
 - `EditUndo2(1)` 有时前几次是空操作；不要无界循环，容易把用户之前的特征也撤掉。

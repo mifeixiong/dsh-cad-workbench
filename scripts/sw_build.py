@@ -65,6 +65,9 @@ def _sketch_node(model, node):
         pass
     try:
         common.sketch_entities(manager, node.get('entities', []))
+        for hole in node.get('holes', []):
+            cx, cy = hole['center']
+            manager.CreateCircleByRadius(cx * common.MM, cy * common.MM, 0, hole['diameter'] / 2.0 * common.MM)
     finally:
         try:
             manager.AddToDB = False

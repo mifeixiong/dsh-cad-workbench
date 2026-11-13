@@ -105,9 +105,9 @@ cadw_doctor
 - 失败图精确回滚（特征数 23 → 23，删除 凸台-拉伸2/草图3）；
 - 过期令牌 `DOC_NOT_FOUND`；锁竞争 `DOC_BUSY`（等待 2.1 s）。
 
-离线测试：`python test/run_all.py` → 4 项全绿（JS 10 例、common 14 例、图校验 35 例、文件审查含 MTEXT）。
+离线测试：`python test/run_all.py` → 4 项全绿（JS 10 例、common 14 例、图校验 37 例、文件审查含 MTEXT）。
 实机回归：`python test/live_regressions.py` → 10/10（Top 面孔位、倒角角度、闭合 polyline、回滚、open/save）。
-高级实机：`python test/live_advanced.py` → 11/11（扫掠、线性/圆周阵列、装配插入/配合/固定/保存）。
+高级实机：`python test/live_advanced.py` → 14/14（扫掠、线性/圆周阵列、装配插入/配合/固定/保存）。
 
 ## 能力边界（v0.2）
 

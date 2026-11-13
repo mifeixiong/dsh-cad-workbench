@@ -176,19 +176,29 @@ function registerTools(ctx) {
     },
   }))
 
-  // 2) 文档会话
+  // 2) 文档会话与已打开窗口管理
   ctx.tools.register(defineTool({
     name: 'cadw_session',
     description:
-      'SolidWorks 文档会话：status / new_part / new_assembly / open / activate / save / save_as / close / close_all / list。' +
-      '每个文档都返回 doc_id；后续写操作必须带这个 doc 令牌，插件会在写入前复核文档身份，' +
-      '防止把特征画到用户正在编辑的另一个文档上。关闭/覆盖已有文件/丢弃未保存修改需要 confirm=true。',
+      'SolidWorks 文档会话与已打开窗口管理：status / list / new_part / new_assembly / open / activate / save / save_as / close / close_others / close_all。' +
+      'list 返回每个打开文档的窗口序号、是否当前、是否有未保存修改；隐藏/参考文档单列（window=false）。' +
+      'close 支持 doc（单个 doc_id）、docs（多个）或 indexes（窗口序号）批量关闭；close_others 用 keep 保留指定文档；close_all 关全部可见窗口。' +
+      '有未保存修改的文档默认拒绝关闭（CONFIRM_REQUIRED），confirm=true 才丢弃（走 QuitDoc，不弹保存框），save_unsaved=true 先保存再关；' +
+      '隐藏/参考文档需 include_hidden=true；dry_run=true 只预览计划。' +
+      '每个文档都返回 doc_id；后续写操作必须带这个 doc 令牌，插件会在写入前复核文档身份。',
     parameters: {
-      action: { type: 'string', required: true, description: 'status | new_part | new_assembly | open | activate | save | save_as | close | close_all | list' },
+      action: { type: 'string', required: true, description: 'status | list | new_part | new_assembly | open | activate | save | save_as | close | close_others | close_all' },
       path: { type: 'string', description: 'open 的源文件，或 save_as 的目标路径（工作区内）' },
       template: { type: 'string', description: '可选：模板绝对路径；缺省自动探测' },
       doc: { type: 'string', description: '文档令牌 doc_id（close/activate/save 用）' },
-      confirm: { type: 'boolean', description: '危险动作确认：覆盖已有文件、丢弃未保存修改、close_all' },
+      docs: { type: 'array', description: 'close：要关闭的 doc_id 数组（可与 indexes 并用，自动去重）' },
+      indexes: { type: 'array', description: 'close：list/status 返回的 1-based 窗口序号数组' },
+      index: { type: 'number', description: 'activate：要激活的窗口序号（也可用 doc）' },
+      keep: { type: 'array', description: 'close_others：要保留的 doc_id 或窗口序号，至少一个' },
+      dry_run: { type: 'boolean', description: '只预览将关闭/丢弃哪些文档，不改 SolidWorks 状态' },
+      save_unsaved: { type: 'boolean', description: '关闭前先保存有未保存修改的文档（默认拒绝丢弃；无磁盘路径会报 SAVE_FAILED）' },
+      include_hidden: { type: 'boolean', description: '允许关闭/操作未显示为窗口的隐藏/参考文档（默认只动可见窗口）' },
+      confirm: { type: 'boolean', description: '危险动作确认：覆盖已有文件、丢弃未保存修改、close_all/close_others' },
       visual: { type: 'boolean', description: '是否把 SolidWorks 前台置前并显示等轴测（默认 true）' },
       workspace: { type: 'string', description: '工作区根目录；缺省用会话当前目录' },
       allow_outside: { type: 'boolean', description: '允许保存到工作区外（默认拒绝）' },
@@ -202,6 +212,13 @@ function registerTools(ctx) {
         action: args.action,
         template: args.template ?? null,
         doc: args.doc ?? null,
+        docs: Array.isArray(args.docs) ? args.docs.map((item) => String(item)) : null,
+        indexes: Array.isArray(args.indexes) ? args.indexes.map((item) => Number(item)) : null,
+        index: Number.isFinite(Number(args.index)) ? Number(args.index) : null,
+        keep: Array.isArray(args.keep) ? args.keep : null,
+        dry_run: args.dry_run === true,
+        save_unsaved: args.save_unsaved === true,
+        include_hidden: args.include_hidden === true,
         confirm: args.confirm === true,
         visual: args.visual !== false,
       }
@@ -219,12 +236,15 @@ function registerTools(ctx) {
       const result = await invoke('sw_session.py', spec, { requirement: 'com', timeoutMs: 210000 })
       if (result.ok === false) return result
       const doc = result.doc
+      const closedDocs = Array.isArray(result.closed_documents) ? result.closed_documents : []
       result.summary = result.summary ?? [
         'action：' + args.action,
         doc ? '文档：' + doc.title + '（' + doc.type + '，doc_id=' + doc.doc_id + '）' : '',
         doc?.path ? '路径：' + displayPath(workspace, doc.path) : '',
         result.closed ? '已关闭：' + result.closed : '',
-        (result.docs ?? []).length ? '已打开 ' + result.docs.length + ' 个文档' : '',
+        closedDocs.length ? '已关闭 ' + closedDocs.length + ' 个文档' : '',
+        Array.isArray(result.documents) ? '当前打开 ' + result.documents.length + ' 个文档 / ' +
+          (result.window_count ?? 0) + ' 个窗口' : '',
       ].filter(Boolean).join('\n')
       return result
     },

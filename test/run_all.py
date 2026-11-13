@@ -27,6 +27,7 @@ def main():
     python = sys.executable
     codes = []
     codes.append(run('common_cases', [python, os.path.join(HERE, 'common_cases.py')]))
+    codes.append(run('session_cases', [python, os.path.join(HERE, 'session_cases.py')]))
     codes.append(run('graph_cases', [python, os.path.join(HERE, 'graph_cases.py')]))
     codes.append(run('review_cases', [python, os.path.join(HERE, 'review_cases.py')]))
     if '--python-only' in sys.argv:

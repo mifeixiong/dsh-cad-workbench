@@ -15,12 +15,12 @@ import sys
 
 SUPPORTED_OPS = ('sketch', 'extrude', 'cut', 'revolve', 'hole', 'fillet', 'chamfer',
                  'sweep', 'linear_pattern', 'circular_pattern')
-SUPPORTED_ENTITIES = ('rect', 'circle', 'polygon', 'polyline', 'centerline', 'arc')
+SUPPORTED_ENTITIES = ('rect', 'circle', 'polygon', 'polyline', 'line', 'centerline', 'arc')
 EXPERIMENTAL_ENTITIES = ('arc',)
 
 COMMON_KEYS = {'op', 'id', 'name', 'hint'}
 OP_KEYS = {
-    'sketch': {'plane', 'offset', 'entities', 'centerline', 'face'},
+    'sketch': {'plane', 'offset', 'entities', 'centerline', 'face', 'holes'},
     'extrude': {'sketch', 'depth', 'direction', 'flip'},
     'cut': {'sketch', 'depth', 'through_all', 'flip', 'both_directions'},
     'revolve': {'sketch', 'axis', 'angle', 'type'},
@@ -33,11 +33,12 @@ OP_KEYS = {
 }
 ENTITY_KEYS = {
     'rect': {'type', 'center', 'width', 'height'},
-    'circle': {'type', 'center', 'radius'},
+    'circle': {'type', 'center', 'radius', 'construction'},
     'polygon': {'type', 'center', 'radius', 'sides', 'rotation'},
-    'polyline': {'type', 'points', 'closed'},
+    'polyline': {'type', 'points', 'closed', 'construction'},
+    'line': {'type', 'from', 'to', 'construction'},
     'centerline': {'type', 'from', 'to'},
-    'arc': {'type', 'center', 'radius', 'start_deg', 'end_deg'},
+    'arc': {'type', 'center', 'radius', 'start_deg', 'end_deg', 'construction'},
 }
 CLOSED_ENTITIES = ('rect', 'circle', 'polygon')
 
@@ -153,7 +154,10 @@ def _entity(entity, node, index):
     if kind == 'circle':
         center = _point(entity.get('center', [0, 0]), 'center', node, path)
         radius = _number(entity.get('radius'), 'radius', node, path, minimum=1e-6)
-        return {'type': 'circle', 'center': center, 'radius': radius}
+        construction = entity.get('construction', False)
+        if not isinstance(construction, bool):
+            _fail('construction 必须是布尔值', node, path)
+        return {'type': 'circle', 'center': center, 'radius': radius, 'construction': construction}
     if kind == 'polygon':
         center = _point(entity.get('center', [0, 0]), 'center', node, path)
         radius = _number(entity.get('radius'), 'radius', node, path, minimum=1e-6)
@@ -174,7 +178,20 @@ def _entity(entity, node, index):
         if closed and parsed[0] != parsed[-1]:
             if math.dist(parsed[0], parsed[-1]) > 1e-6:
                 parsed.append(parsed[0])
-        return {'type': 'polyline', 'points': parsed, 'closed': closed}
+        construction = entity.get('construction', False)
+        if not isinstance(construction, bool):
+            _fail('construction 必须是布尔值', node, path)
+        return {'type': 'polyline', 'points': parsed, 'closed': closed,
+                'construction': construction}
+    if kind == 'line':
+        start = _point(entity.get('from'), 'from', node, path)
+        end = _point(entity.get('to'), 'to', node, path)
+        if start == end:
+            _fail('line 的 from 与 to 不能重合', node, path)
+        construction = entity.get('construction', False)
+        if not isinstance(construction, bool):
+            _fail('construction 必须是布尔值', node, path)
+        return {'type': 'line', 'from': start, 'to': end, 'construction': construction}
     if kind == 'centerline':
         start = _point(entity.get('from'), 'from', node, path)
         end = _point(entity.get('to'), 'to', node, path)
@@ -186,7 +203,11 @@ def _entity(entity, node, index):
         radius = _number(entity.get('radius'), 'radius', node, path, minimum=1e-6)
         start = _number(entity.get('start_deg', 0), 'start_deg', node, path)
         end = _number(entity.get('end_deg', 90), 'end_deg', node, path)
-        return {'type': 'arc', 'center': center, 'radius': radius, 'start_deg': start, 'end_deg': end}
+        construction = entity.get('construction', False)
+        if not isinstance(construction, bool):
+            _fail('construction 必须是布尔值', node, path)
+        return {'type': 'arc', 'center': center, 'radius': radius, 'start_deg': start,
+                'end_deg': end, 'construction': construction}
     _fail('未处理的实体类型：%s' % kind, node, path)
 
 
@@ -214,8 +235,48 @@ def _profile_points(entity):
     return []
 
 
+def _line_intersection(line_a, line_b, node, path):
+    (x1, y1), (x2, y2) = line_a['from'], line_a['to']
+    (x3, y3), (x4, y4) = line_b['from'], line_b['to']
+    denominator = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+    if abs(denominator) < 1e-12:
+        _fail('holes.intersection 的两条辅助线平行，无法求交点', node, path)
+    px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denominator
+    py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denominator
+    return [round(px, 9), round(py, 9)]
+
+
+def _holes(entities, holes, node, path):
+    parsed = []
+    for index, hole in enumerate(holes or []):
+        item_path = 'holes[%d]' % index
+        if not isinstance(hole, dict):
+            _fail('hole 必须是对象', node, item_path)
+        _keys(hole, {'diameter', 'at', 'intersection'}, 'hole', node, item_path)
+        diameter = _number(hole.get('diameter'), 'diameter', node, item_path, minimum=1e-6)
+        if hole.get('at') is not None:
+            center = _point(hole.get('at'), 'at', node, item_path)
+        elif hole.get('intersection') is not None:
+            pair = hole.get('intersection')
+            if not isinstance(pair, list) or len(pair) != 2:
+                _fail('intersection 必须是两个 line 实体的下标', node, item_path)
+            lines = []
+            for position in pair:
+                if not isinstance(position, int) or not (0 <= position < len(entities)):
+                    _fail('intersection 下标越界', node, item_path)
+                entity = entities[position]
+                if entity.get('type') != 'line':
+                    _fail('intersection 只能引用 line 实体', node, item_path)
+                lines.append(entity)
+            center = _line_intersection(lines[0], lines[1], node, item_path)
+        else:
+            _fail('hole 需要 at 或 intersection', node, item_path)
+        parsed.append({'center': center, 'diameter': diameter})
+    return parsed
+
+
 def _require_closed(sketch_node, index, path, label):
-    entities = sketch_node.get('entities', [])
+    entities = [entity for entity in sketch_node.get('entities', []) if not entity.get('construction')]
     if not any(
         entity.get('type') in CLOSED_ENTITIES
         or (entity.get('type') == 'polyline' and entity.get('closed'))
@@ -314,6 +375,8 @@ def validate(graph):
             parsed_entities = [_entity(entity, index, position) for position, entity in enumerate(entities)]
             # 闭合轮廓在使用时校验：sweep 的路径草图允许是开放折线。
             base['entities'] = parsed_entities
+            if node.get('holes') is not None:
+                base['holes'] = _holes(parsed_entities, node.get('holes'), index, path)
             centerline = node.get('centerline')
             if centerline is not None:
                 if not isinstance(centerline, (list, tuple)) or len(centerline) != 2:

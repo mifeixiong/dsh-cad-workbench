@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 (2026-11-13) · 辅助线驱动建模 + 圆柱面同心配合
+
+- Feature Graph 新增 `line` 实体与 `construction: true`（构造线/辅助线，不参与拉伸轮廓）；polyline/circle/arc 也可标记构造。
+- sketch 新增 `holes`：孔位可用 `intersection:[lineA,lineB]` 由两条辅助线交点给出，不必手算坐标。实测 80×60×5 板 4×Ø6 孔体积 23434.513 mm³（误差 0）。
+- `cadw_assembly` 新增 `hole` 选择器：按零件局部坐标 + 半径找圆柱孔壁，映射到装配体上下文做同心配合（`MateConcentric`）。
+- 修复动态分派下圆柱面选择：`GetSurface`/`IsCylinder`/`CylinderParams` 是属性；圆柱面实体必须用 `Select4` 才能进入选择集。
+- 实机：11 零件高保真 LeARM 复刻（框形连杆 + 关节孔 + 舵机盒），包围盒 160×460×300 mm；7 个同心关节配合创建成功。
+
 ## 0.2.1 (2026-11-13) · 装配坐标语义
 
 - 明确并文档化：`cadw_assembly insert` 的 x/y/z 是**组件几何中心**（SW2024 实测），不是零件原点。

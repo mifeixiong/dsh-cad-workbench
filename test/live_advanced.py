@@ -108,7 +108,63 @@ def main():
           round(volume(token), 2))
     close(token)
 
-    # 4) assembly
+    # 4) 构造线 + 交点孔
+    token = new_part()
+    plate = run('sw_build.py', {'workspace': WORK, 'doc': token, 'graph': {'units': 'mm', 'nodes': [
+        {'op': 'sketch', 'plane': 'front', 'entities': [
+            {'type': 'rect', 'width': 80, 'height': 60},
+            {'type': 'line', 'from': [-25, -30], 'to': [-25, 30], 'construction': True},
+            {'type': 'line', 'from': [25, -30], 'to': [25, 30], 'construction': True},
+            {'type': 'line', 'from': [-40, -15], 'to': [40, -15], 'construction': True},
+            {'type': 'line', 'from': [-40, 15], 'to': [40, 15], 'construction': True},
+        ], 'holes': [
+            {'diameter': 6, 'intersection': [1, 3]},
+            {'diameter': 6, 'intersection': [1, 4]},
+            {'diameter': 6, 'intersection': [2, 3]},
+            {'diameter': 6, 'intersection': [2, 4]},
+        ]},
+        {'op': 'extrude', 'depth': 5},
+    ]}})
+    check('construction_holes.build', plate.get('ok') is True, plate.get('error'))
+    expected = 80 * 60 * 5 - 4 * math.pi * 9 * 5
+    check('construction_holes.volume', abs(volume(token) - expected) < 0.01,
+          round(volume(token), 3))
+    close(token)
+
+    # 5) 圆柱孔同心配合
+    hole_a = os.path.join(WORK, 'hole_a.sldprt')
+    hole_b = os.path.join(WORK, 'hole_b.sldprt')
+    for name, size in (('hole_a', 80), ('hole_b', 60)):
+        token = new_part()
+        built = run('sw_build.py', {'workspace': WORK, 'doc': token, 'graph': {'units': 'mm', 'nodes': [
+            {'op': 'sketch', 'plane': 'front', 'entities': [
+                {'type': 'rect', 'width': size, 'height': size},
+                {'type': 'circle', 'radius': 5},
+            ]},
+            {'op': 'extrude', 'depth': 5},
+        ]}})
+        if not built.get('ok'):
+            check('hole_plate.' + name, False, built.get('error'))
+            close(token)
+            continue
+        saved_part = run('sw_session.py', {'workspace': WORK, 'action': 'save_as', 'doc': token,
+                                           'path': os.path.join(WORK, name + '.sldprt'),
+                                           'confirm': True, 'visual': False})
+        close(saved_part.get('doc', {}).get('doc_id') or token)
+    asm_new = run('sw_assembly.py', {'workspace': WORK, 'action': 'new'})
+    asm_token = asm_new.get('doc', {}).get('doc_id')
+    inserted = run('sw_assembly.py', {'workspace': WORK, 'action': 'insert', 'doc': asm_token,
+        'components': [{'path': hole_a, 'fixed': True}, {'path': hole_b, 'x': 40, 'z': 20}]})
+    mate = run('sw_assembly.py', {'workspace': WORK, 'action': 'mate', 'doc': asm_token, 'mates': [
+        {'type': 'concentric',
+         'a': {'component': 'hole_a-1', 'hole': {'at': [0, 0, 2.5], 'radius': 5}},
+         'b': {'component': 'hole_b-1', 'hole': {'at': [0, 0, 2.5], 'radius': 5}}},
+    ]})
+    check('concentric_mate', mate.get('ok') is True and mate.get('mate_count') == 1,
+          json.dumps(mate.get('error') or mate.get('mates'), ensure_ascii=False)[:300])
+    close(asm_token)
+
+    # 6) assembly
     part_a = os.path.join(WORK, 'plate.sldprt')
     part_b = os.path.join(WORK, 'pin.sldprt')
     token = new_part()

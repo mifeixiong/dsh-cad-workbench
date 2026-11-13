@@ -420,27 +420,118 @@ def retry_busy(function, *args, attempts=6, delay=0.6, **kwargs):
     )
 
 
+def solidworks_pids():
+    """枚举正在运行的 SLDWORKS.exe 进程号（不依赖 ROT / tasklist）。
+
+    GetActiveObject 走 ROT；本机 SW2024 偶尔不注册 ROT（MK_E_UNAVAILABLE），
+    但 CoCreateInstance（Dispatch）仍能附着到同一个单实例。要安全地走这个
+    回退，必须先确认进程真的在运行——否则 Dispatch 会把没开的 SolidWorks
+    拉起来，违背 status/list “只附着，不拉起”的约定。
+    """
+    if os.name != 'nt':
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    TH32CS_SNAPPROCESS = 0x00000002
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ('dwSize', wintypes.DWORD),
+            ('cntUsage', wintypes.DWORD),
+            ('th32ProcessID', wintypes.DWORD),
+            ('th32DefaultHeapID', ctypes.c_void_p),
+            ('th32ModuleID', wintypes.DWORD),
+            ('cntThreads', wintypes.DWORD),
+            ('th32ParentProcessID', wintypes.DWORD),
+            ('pcPriClassBase', wintypes.LONG),
+            ('dwFlags', wintypes.DWORD),
+            ('szExeFile', wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snapshot in (None, 0, wintypes.HANDLE(-1).value):
+        return []
+    entry = PROCESSENTRY32W()
+    entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+    found = []
+    try:
+        ok = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while ok:
+            if str(entry.szExeFile).lower() == 'sldworks.exe':
+                found.append(int(entry.th32ProcessID))
+            ok = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return found
+
+
 def attach(launch=False):
-    """连接 SolidWorks。launch=False 时只附着到已运行实例。"""
+    """连接 SolidWorks。launch=False 时只附着到已运行实例（绝不拉起）。"""
     pythoncom, win32 = _win32com()
     try:
         pythoncom.CoInitialize()
     except Exception:
         pass
     client = win32.dynamic
-    try:
-        if launch:
+    if launch:
+        try:
             app = client.Dispatch('SldWorks.Application')
-        else:
+        except Exception as error:  # noqa: BLE001
+            raise CadError(
+                'COM_UNAVAILABLE',
+                '无法启动/连接 SolidWorks（SldWorks.Application 未注册或安装损坏）。',
+                {'error': str(error)},
+            )
+    else:
+        app = None
+        active_error = None
+        try:
             app = win32.GetActiveObject('SldWorks.Application')
-    except Exception as error:  # noqa: BLE001
-        raise CadError(
-            'COM_UNAVAILABLE',
-            ('无法连接 SolidWorks。请先启动 SolidWorks 到主界面，并确认已授权；'
-             '若刚安装，请重启一次。') if not launch else
-            ('无法启动/连接 SolidWorks（SldWorks.Application 未注册或安装损坏）。'),
-            {'error': str(error)},
-        )
+        except Exception as error:  # noqa: BLE001
+            active_error = error
+        if app is None:
+            pids = solidworks_pids()
+            if not pids:
+                raise CadError(
+                    'COM_UNAVAILABLE',
+                    'SolidWorks 未运行（status/list/close 只附着，不自动启动）。请先启动 SolidWorks 到主界面，再重试。',
+                    {'error': str(active_error), 'processes': []},
+                )
+            try:
+                app = client.Dispatch('SldWorks.Application')
+            except Exception as error:  # noqa: BLE001
+                raise CadError(
+                    'COM_UNAVAILABLE',
+                    'SolidWorks 进程在运行（pid=%s），但 COM 附着失败。请确认 SolidWorks 没有停在模态对话框，并稍后重试。'
+                    % ','.join(str(pid) for pid in pids),
+                    {'error': str(active_error), 'fallback_error': str(error), 'processes': pids},
+                )
+            # 确认附着的是已有实例，而不是 Dispatch 新拉起的第二份。
+            try:
+                pid = int(app.GetProcessID)
+                if pid not in pids:
+                    try:
+                        app.ExitApp()
+                    except Exception:
+                        pass
+                    raise CadError(
+                        'COM_UNAVAILABLE',
+                        'COM 附着到了新启动的 SolidWorks 实例（pid=%s），已退出；请先打开目标 SolidWorks。' % pid,
+                        {'processes': pids, 'attached_pid': pid},
+                    )
+            except CadError:
+                raise
+            except Exception:
+                pass
     # 某些机器上装过 makepy/gen_py 缓存时，GetActiveObject 会返回带类型库的包装，
     # 它不接受 VARIANT byref（OpenDoc6/AddMate5 会报类型错误）。这里强制回动态分派。
     module = type(app).__module__ or ''
@@ -612,6 +703,135 @@ def find_document(app, token):
         '找不到 doc_id=%s 的已打开文档（可能已关闭或换了文档）。请重新调用 cadw_session 获取令牌。' % token,
         {'open_docs': [doc_identity(model) for model in open_documents(app)]},
     )
+
+
+def open_windows(app):
+    """当前 Frame 里的可见模型窗口（IModelWindow -> ModelDoc）。
+
+    注意 GetDocuments 会把装配/工程图引用但未显示为窗口的文档也算进来；
+    用户说“关窗口”时通常只指 ModelWindows。关闭隐藏文档要单独确认。
+    """
+    windows = []
+    try:
+        raw = app.Frame.ModelWindows
+    except Exception:
+        raw = None
+    for item in raw or []:
+        try:
+            model = item.ModelDoc
+        except Exception:
+            model = None
+        if model is None:
+            continue
+        try:
+            hwnd = int(item.HWnd)
+        except Exception:
+            hwnd = None
+        windows.append({'model': model, 'hwnd': hwnd})
+    return windows
+
+
+def document_inventory(app):
+    """已打开文档清单：窗口序号、是否当前、是否有未保存修改。
+
+    窗口顺序来自 IFrame.ModelWindows；GetDocuments 里不在窗口中的文档标
+    window=false、index=null。saved 为 None 表示读不到保存标记（按脏处理）。
+    """
+    windows = open_windows(app)
+    order = {}
+    for index, item in enumerate(windows, 1):
+        try:
+            identity = doc_identity(item['model'])
+        except Exception:
+            continue
+        order[identity['doc_id']] = {'index': index, 'hwnd': item.get('hwnd')}
+    active_id = None
+    try:
+        active = app.ActiveDoc
+        if active is not None:
+            active_id = doc_identity(active)['doc_id']
+    except Exception:
+        active_id = None
+    entries = []
+    seen = set()
+    for model in open_documents(app):
+        try:
+            identity = doc_identity(model)
+        except Exception:
+            continue
+        info = order.get(identity['doc_id'])
+        identity['window'] = info is not None
+        identity['index'] = info['index'] if info else None
+        identity['active'] = identity['doc_id'] == active_id
+        entries.append(identity)
+        seen.add(identity['doc_id'])
+    for item in windows:
+        try:
+            identity = doc_identity(item['model'])
+        except Exception:
+            continue
+        if identity['doc_id'] in seen:
+            continue
+        identity['window'] = True
+        identity['index'] = order.get(identity['doc_id'], {}).get('index')
+        identity['active'] = identity['doc_id'] == active_id
+        entries.append(identity)
+        seen.add(identity['doc_id'])
+    entries.sort(key=lambda entry: (0, entry['index']) if entry.get('index') else (1, 0))
+    return entries
+
+
+def wait_document_closed(app, doc_id, timeout=6.0):
+    """轮询确认文档已从 GetDocuments 消失（CloseDoc 是异步 UI 操作）。"""
+    deadline = time.time() + max(0.5, float(timeout))
+    while True:
+        open_now = False
+        try:
+            for model in open_documents(app):
+                try:
+                    if doc_identity(model)['doc_id'] == doc_id:
+                        open_now = True
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            open_now = False
+        if not open_now:
+            return True
+        if time.time() >= deadline:
+            return False
+        time.sleep(0.1)
+
+
+def close_document(app, model, discard=False):
+    """关闭一个文档。脏文档必须 discard=True 才走 QuitDoc（不保存、不弹窗）。
+
+    返回关闭前的身份；若关闭后仍在打开列表里，抛 CLOSE_FAILED。
+    """
+    identity = doc_identity(model)
+    dirty = identity.get('saved') is not True
+    if dirty and not discard:
+        raise CadError(
+            'CONFIRM_REQUIRED',
+            '文档 %s 有未保存修改；关闭会丢弃。确认请传 confirm=true，或 save_unsaved=true 先保存。'
+            % (identity.get('title') or identity['doc_id']),
+            {'doc': identity},
+        )
+    name = identity.get('title') or identity.get('path')
+    if not name:
+        raise CadError('DOC_NOT_FOUND', '文档没有标题/路径，无法关闭。', {'doc': identity})
+    if dirty:
+        # CloseDoc 对脏文档可能弹保存确认框并卡住调用方；QuitDoc 明确不保存关闭。
+        retry_busy(app.QuitDoc, name)
+    else:
+        retry_busy(app.CloseDoc, name)
+    if not wait_document_closed(app, identity['doc_id']):
+        raise CadError(
+            'CLOSE_FAILED',
+            '关闭后文档仍在打开列表里：%s（可能被保存确认框或其他命令挡住）。' % name,
+            {'doc': identity},
+        )
+    return identity
 
 
 def verify_identity(model, expected_token):
@@ -825,7 +1045,9 @@ def sketch_entities(sketch, spec):
             created += 1
         elif kind == 'circle':
             cx, cy = entity.get('center', [0, 0])
-            sketch.CreateCircleByRadius(cx * MM, cy * MM, 0, float(entity['radius']) * MM)
+            segment = sketch.CreateCircleByRadius(cx * MM, cy * MM, 0, float(entity['radius']) * MM)
+            if entity.get('construction'):
+                _set_construction(segment)
             created += 1
         elif kind == 'polygon':
             import math
@@ -849,7 +1071,16 @@ def sketch_entities(sketch, spec):
             for index in range(total):
                 x1, y1 = points[index]
                 x2, y2 = points[(index + 1) % len(points)]
-                sketch.CreateLine(x1 * MM, y1 * MM, 0, x2 * MM, y2 * MM, 0)
+                segment = sketch.CreateLine(x1 * MM, y1 * MM, 0, x2 * MM, y2 * MM, 0)
+                if entity.get('construction'):
+                    _set_construction(segment)
+            created += 1
+        elif kind == 'line':
+            x1, y1 = entity['from']
+            x2, y2 = entity['to']
+            segment = sketch.CreateLine(x1 * MM, y1 * MM, 0, x2 * MM, y2 * MM, 0)
+            if entity.get('construction'):
+                _set_construction(segment)
             created += 1
         elif kind == 'centerline':
             x1, y1 = entity['from']
@@ -867,11 +1098,25 @@ def sketch_entities(sketch, spec):
             method = getattr(sketch, 'CreateArc', None)
             if method is None:
                 raise CadError('UNSUPPORTED', '当前 SolidWorks 不支持 CreateArc；请改用 polyline 近似。')
-            method(cx * MM, cy * MM, 0, sx * MM, sy * MM, 0, ex * MM, ey * MM, 0, 1)
+            segment = method(cx * MM, cy * MM, 0, sx * MM, sy * MM, 0, ex * MM, ey * MM, 0, 1)
+            if entity.get('construction'):
+                _set_construction(segment)
             created += 1
         else:
-            raise CadError('UNSUPPORTED', '不支持的草图实体：%s（v0.1 支持 rect/circle/polygon/polyline/centerline/arc）。' % kind)
+            raise CadError('UNSUPPORTED', '不支持的草图实体：%s（支持 rect/circle/polygon/polyline/line/centerline/arc）。' % kind)
     return created
+
+
+def _set_construction(segment):
+    """把草图段标为构造线（辅助线），不影响拉伸轮廓。"""
+    if segment is None:
+        return False
+    try:
+        segment.ConstructionGeometry = True
+        return True
+    except Exception:
+        return False
+
 
 
 def select_sketch(model, name):

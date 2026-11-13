@@ -93,6 +93,23 @@ CASES = [
         {'op': 'sketch', 'id': 'profile', 'entities': [{'type': 'circle', 'radius': 2}]},
         {'op': 'sweep', 'profile': 'profile', 'path': 'path'},
     ]}, True, None),
+    ('construction_holes_ok', {'units': 'mm', 'nodes': [
+        {'op': 'sketch', 'entities': [
+            {'type': 'rect', 'width': 80, 'height': 60},
+            {'type': 'line', 'from': [-30, 0], 'to': [30, 0], 'construction': True},
+            {'type': 'line', 'from': [0, -20], 'to': [0, 20], 'construction': True},
+        ], 'holes': [
+            {'diameter': 6, 'intersection': [1, 2]},
+        ]},
+        {'op': 'extrude', 'depth': 5},
+    ]}, True, None),
+    ('parallel_guides_fail', {'units': 'mm', 'nodes': [
+        {'op': 'sketch', 'entities': [
+            {'type': 'rect', 'width': 80, 'height': 60},
+            {'type': 'line', 'from': [0, 0], 'to': [30, 0], 'construction': True},
+            {'type': 'line', 'from': [0, 10], 'to': [30, 10], 'construction': True},
+        ], 'holes': [{'diameter': 6, 'intersection': [1, 2]}]},
+    ]}, False, '平行'),
     ('pattern_bad_ref', {'units': 'mm', 'nodes': [
         {'op': 'sketch', 'entities': [rect()]},
         {'op': 'extrude', 'depth': 2},

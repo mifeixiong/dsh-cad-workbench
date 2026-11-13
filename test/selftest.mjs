@@ -70,6 +70,19 @@ test('registers nine cadw_* tools with parameters and output schema', () => {
   }
 })
 
+test('cadw_session exposes open-window management actions and parameters', () => {
+  const { ctx, definitions } = mockContext()
+  apply(ctx)
+  const session = definitions.get('cadw_session')
+  assert.match(session.description, /close_others/)
+  assert.match(session.description, /include_hidden/)
+  for (const key of ['docs', 'indexes', 'index', 'keep', 'dry_run', 'save_unsaved', 'include_hidden']) {
+    assert.ok(session.parameters[key], 'cadw_session 缺参数 ' + key)
+  }
+  assert.match(session.parameters.action.description, /close_others/)
+  assert.match(session.parameters.action.description, /close_all/)
+})
+
 test('registers bundled skills through the skills provider', async () => {
   const { ctx, provider } = mockContext()
   apply(ctx)

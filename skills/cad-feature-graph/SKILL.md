@@ -19,6 +19,7 @@ description: "Feature Graph DSL 参考：节点字段、草图实体、引用规
 | `hole` | `at`、`diameter` | `through_all`（默认 true）、`depth` | 面上打孔（糖：草图+切除） |
 | `fillet` | `radius`、`edges` | — | 恒定半径圆角 |
 | `chamfer` | `distance`、`edges` | `angle`（默认 45） | 角度-距离倒角 |
+| `line` | `from`、`to` | `construction`（默认 false） | 辅助线；构造线不参与轮廓 |
 | `sweep` | 轮廓草图闭合 | `profile`、`path`（草图 id/列表）、`merge` | 扫掠凸台（路径可开放折线） |
 | `linear_pattern` | `feature`、`direction`、`count`、`spacing` | `count2`、`spacing2`、`flip` | 线性阵列（方向为边上一点） |
 | `circular_pattern` | `feature`、`axis`、`count` | `angle`、`equal_spacing`、`flip` | 圆周阵列（轴为圆边/直边上一点） |
@@ -102,6 +103,23 @@ description: "Feature Graph DSL 参考：节点字段、草图实体、引用规
 | `GRAPH_INVALID` | 字段/范围/闭环/引用有问题；`details.path` 指向具体字段 |
 | `BUILD_FAILED` | SolidWorks 执行失败；`details.cause` 是根因，`details.node_index` 是节点序号 |
 | `PLAN_MISMATCH` | 实测与 `expect` 不符（JS 侧判定，容差 max(1 mm, 2%)） |
+
+## 辅助线定位孔（推荐）
+
+`sketch.holes` 可直接用两条 `line` 的交点定位孔，避免手算坐标：
+
+```json
+{"op":"sketch","plane":"front","entities":[
+  {"type":"rect","width":80,"height":60},
+  {"type":"line","from":[-25,-30],"to":[-25,30],"construction":true},
+  {"type":"line","from":[25,-30],"to":[25,30],"construction":true},
+  {"type":"line","from":[-40,-15],"to":[40,-15],"construction":true},
+  {"type":"line","from":[-40,15],"to":[40,15],"construction":true}],
+ "holes":[{"diameter":6,"intersection":[1,3]},{"diameter":6,"intersection":[1,4]},
+          {"diameter":6,"intersection":[2,3]},{"diameter":6,"intersection":[2,4]}]}
+```
+
+构造线也可用 `circle` / `arc` / `polyline` 的 `construction:true`（例如分度圆）；`holes[].at` 仍可直接给坐标。
 
 ## 扫掠 / 阵列示例
 

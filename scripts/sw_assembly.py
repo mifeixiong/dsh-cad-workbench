@@ -139,11 +139,78 @@ def _plane_entity(app, component, plane, opened_parts):
     return entity
 
 
+def _cylinder_entity(app, component, spec, opened_parts):
+    """按零件局部坐标 + 半径找圆柱面（孔壁），映射到装配体上下文。"""
+    part, opened = _part_of_component(app, component)
+    if opened:
+        opened_parts.append(part)
+    target = spec.get('at')
+    if not isinstance(target, (list, tuple)) or len(target) != 3:
+        raise common.CadError('BAD_ARGS', 'hole 选择器需要 at:[x,y,z]（零件局部坐标，mm）。')
+    target = [float(value) for value in target]
+    radius = spec.get('radius')
+    radius = None if radius is None else float(radius)
+    tolerance = float(spec.get('radius_tol', 0.4))
+    best = None
+    best_distance = 1e18
+    for body in part.GetBodies2(0, False) or []:
+        for face in body.GetFaces() or []:
+            try:
+                # GetSurface / IsCylinder / CylinderParams 在动态分派下都是属性，不能当方法调用
+                surface = face.GetSurface
+                if not surface or not surface.IsCylinder:
+                    continue
+                params = surface.CylinderParams
+                origin = [float(params[0]) * 1000, float(params[1]) * 1000, float(params[2]) * 1000]
+                axis = [float(params[3]), float(params[4]), float(params[5])]
+                face_radius = float(params[6]) * 1000
+                if radius is not None and abs(face_radius - radius) > tolerance:
+                    continue
+                delta = [target[0] - origin[0], target[1] - origin[1], target[2] - origin[2]]
+                cross = [delta[1] * axis[2] - delta[2] * axis[1],
+                         delta[2] * axis[0] - delta[0] * axis[2],
+                         delta[0] * axis[1] - delta[1] * axis[0]]
+                distance = sum(value * value for value in cross) ** 0.5
+                if distance < best_distance:
+                    best = face
+                    best_distance = distance
+            except Exception:
+                continue
+    if best is None or best_distance > float(spec.get('tol', 2.0)):
+        raise common.CadError('UNSUPPORTED',
+                              '组件 %s 在 (%s,%s,%s) 附近找不到半径 %s 的圆柱面。'
+                              % (_component_name(component), target[0], target[1], target[2],
+                                 radius if radius is not None else '任意'))
+    entity = component.GetCorresponding(best)
+    if entity is None:
+        raise common.CadError('UNSUPPORTED', '无法把组件 %s 的圆柱面映射到装配体上下文。'
+                              % _component_name(component))
+    return entity
+
+
+def _entity_for(app, component, selector, opened_parts):
+    if not isinstance(selector, dict):
+        raise common.CadError('BAD_ARGS', '配合选择器必须是对象。')
+    if selector.get('plane') is not None:
+        return _plane_entity(app, component, selector.get('plane'), opened_parts)
+    if selector.get('hole') is not None:
+        return _cylinder_entity(app, component, selector.get('hole'), opened_parts)
+    raise common.CadError('BAD_ARGS', '配合选择器需要 plane 或 hole。')
+
+
 def _add_mate(asm, component_a, component_b, entity_a, entity_b, options):
     asm.ClearSelection2(True)
-    if not entity_a.Select2(False, 1):
+    empty = common._empty_variant()
+    # 圆柱面实体用 Select2 会返回 True 但选择集为空；Select4 才真正加入选择集。
+    try:
+        selected_a = entity_a.Select4(False, empty)
+        selected_b = entity_b.Select4(True, empty)
+    except Exception:
+        selected_a = entity_a.Select2(False, 1)
+        selected_b = entity_b.Select2(True, 1)
+    if not selected_a:
         raise common.CadError('BUILD_FAILED', '选择第一个配合实体失败。')
-    if not entity_b.Select2(True, 1):
+    if not selected_b:
         raise common.CadError('BUILD_FAILED', '选择第二个配合实体失败。')
     count = asm.SelectionManager.GetSelectedObjectCount2(-1)
     if count != 2:
@@ -284,8 +351,10 @@ def action_mate(app, asm, spec):
             component_a = _find_component(asm, selector_a.get('component'))
             component_b = _find_component(asm, selector_b.get('component'))
             common.activate(app, asm)
-            entity_a = _plane_entity(app, component_a, selector_a.get('plane'), opened_parts)
-            entity_b = _plane_entity(app, component_b, selector_b.get('plane'), opened_parts)
+            entity_a = _entity_for(app, component_a, selector_a, opened_parts)
+            entity_b = _entity_for(app, component_b, selector_b, opened_parts)
+            # 打开零件取几何会把活动文档切到零件；选实体前必须切回装配体。
+            common.activate(app, asm)
             results.append(_add_mate(asm, component_a, component_b, entity_a, entity_b, item))
         return {'ok': True, 'doc': common.doc_identity(asm), 'mates': results,
                 'mate_count': len(_mates(asm)), 'all_mates': _mates(asm)}

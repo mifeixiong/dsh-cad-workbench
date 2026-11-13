@@ -14,7 +14,7 @@
 Save As 后 `doc_id` 会变；危险动作未确认时返回 `CONFIRM_REQUIRED`。
 
 ## cadw_model
-节点：sketch/extrude/cut/revolve/hole/fillet/chamfer/sweep/linear_pattern/circular_pattern。
+节点：sketch/extrude/cut/revolve/hole/fillet/chamfer/sweep/linear_pattern/circular_pattern；草图支持构造线（`line`/`construction`）与 `holes` 交点定位。
 参数：`doc`、`graph`、`dry_run?`、`visual?`、`expect?{bbox_mm,volume_mm3,feature_count}`、
 `rollback_on_fail?`（默认 true）、`job_id?`。
 返回：`created[]`、`features_before/after`、`measurements`、`verification{status,checks,failures}`、
@@ -52,7 +52,7 @@ zero_length、duplicates、dimensions、text_height、text_empty、extents。
 ## cadw_assembly
 参数：`action`（new/insert/mate/fix/list）、`doc?`、`components?`、`mates?`、`component?`、`fixed?`。
 `components`：`[{path,x?,y?,z?,fixed?}]`（mm；**x/y/z 是组件几何中心**）；`mates`：`[{type,a:{component,plane},b:{component,plane},distance?,angle?,align?,flip?,lock_rotation?}]`，
-type 支持 coincident/concentric/perpendicular/parallel/tangent/distance/angle。
+type 支持 coincident/concentric/perpendicular/parallel/tangent/distance/angle；关节选择器可用 `hole:{at:[x,y,z],radius}` 做同心配合。
 返回：`doc`、`components[{name,path,fixed}]`、`mates[{type,name,a,b,error_status}]`、`mate_count`、`component_count`。
 
 ## cadw_job
