@@ -1,5 +1,7 @@
 # 安全与纪律
 
+> 运行平台：仅 Windows（依赖 SolidWorks COM）。CI 也只在 Windows 上跑离线单测，不做跨平台承诺。
+
 ## 文档身份
 
 - 每个文档返回 `doc_id = sha256(realpath 或 "unsaved:"+title)[:16]`。

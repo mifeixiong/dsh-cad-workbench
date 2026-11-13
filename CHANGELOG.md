@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 (2026-11-13) · 收窄平台承诺
+
+- CI 只保留 Windows（插件依赖 SolidWorks COM；Ubuntu 只跑离线单测，不能验证产品）。
+- 删除路径守卫里的 POSIX 分支与 Windows-绝对路径跨平台判断，规则回到 Windows-only；行为不变。
+
 ## 0.1.1 (2026-11-13) · 审计修复
 
 三个子代理并行审计后修复（静态 bug 审查 / SolidWorks 实机对抗 / 效率基准）。

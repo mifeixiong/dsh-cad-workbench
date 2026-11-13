@@ -6,11 +6,8 @@ on:
 
 jobs:
   offline:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    # 插件依赖 SolidWorks COM，只支持 Windows；离线单测也只在 Windows 上跑。
+    runs-on: windows-latest
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8

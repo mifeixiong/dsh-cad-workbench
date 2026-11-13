@@ -139,12 +139,8 @@ test('guardOutputPath confines writes to the workspace', async () => {
   assert.ok(inside.startsWith(workspace))
   const { mkdir } = await import('node:fs/promises')
   await mkdir(join(workspace, 'cad-output'), { recursive: true })
-  const forbidden = process.platform === 'win32' ? 'C:\\Windows\\x.step' : '/etc/passwd'
-  assert.throws(() => guardOutputPath(workspace, forbidden), /PATH_DENIED|系统/)
+  assert.throws(() => guardOutputPath(workspace, 'C:\\Windows\\x.step'), /PATH_DENIED|系统/)
   assert.throws(() => guardOutputPath(workspace, join(tmpdir(), 'outside.step')), /工作区/)
-  if (process.platform !== 'win32') {
-    assert.throws(() => guardOutputPath(workspace, 'C:\\Windows\\x.step'), /Windows 绝对路径/)
-  }
   await writeFile(inside, 'x')
   assert.throws(() => guardOutputPath(workspace, 'cad-output/a.step'), /已存在/)
   assert.ok(guardOutputPath(workspace, 'cad-output/a.step', { overwrite: true }))
