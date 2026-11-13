@@ -586,7 +586,7 @@ function registerTools(ctx) {
     parameters: {
       action: { type: 'string', required: true, description: 'new | insert | mate | fix | list' },
       doc: { type: 'string', description: '装配体文档令牌 doc_id（new 之外必填）' },
-      components: { type: 'json', description: 'insert：[{path, x?, y?, z?, fixed?}]，位置单位 mm' },
+      components: { type: 'json', description: 'insert：[{path, x?, y?, z?, fixed?}]，位置单位 mm；x/y/z 是组件几何中心（SW2024 实测）' },
       mates: { type: 'json', description: 'mate：[{type, a:{component,plane}, b:{component,plane}, distance?, angle?, align?, flip?, lock_rotation?}]' },
       component: { type: 'string', description: 'fix：组件名字或序号' },
       fixed: { type: 'boolean', description: 'fix：true 固定 / false 浮动（默认 true）' },

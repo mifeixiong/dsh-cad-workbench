@@ -1,6 +1,6 @@
 {
   "id": "dsh-cad-workbench",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "main": "index.js",
   "description": "Mechanical CAD workbench for DeepSeek Harness: declarative SolidWorks modelling with measured verification, view self-check, drawings, and DXF/STEP/STL review.",
   "engines": {

@@ -76,7 +76,7 @@ description: "SolidWorks 机械 CAD 总控流程：需求→参数表→批准�
 ## 4.5 装配（cadw_assembly）
 
 1. `cadw_assembly({action:"new"})` 新建装配体（或 `cadw_session new_assembly`）。
-2. `insert`：`[{path,x,y,z,fixed}]`（mm）。零件必须先保存到磁盘；脚本会自动打开引用零件以便配合。
+2. `insert`：`[{path,x,y,z,fixed}]`（mm）。**x/y/z 是组件的几何中心**（SW2024 实测；不是零件原点），布局时按中心算坐标。零件必须先保存到磁盘；脚本会自动打开引用零件以便配合。
 3. `mate`：`a/b` 用 `{component:"plate-1", plane:"top"}`；type 用 coincident/distance/parallel/perpendicular/tangent/angle。
    固定件建议先 `fixed:true`；运动件不要三面锁死。
 4. 验证：`list` 看组件与配合；`mate_count` 必须增加；保存用 `cadw_session save_as`。

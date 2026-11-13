@@ -51,7 +51,7 @@ zero_length、duplicates、dimensions、text_height、text_empty、extents。
 
 ## cadw_assembly
 参数：`action`（new/insert/mate/fix/list）、`doc?`、`components?`、`mates?`、`component?`、`fixed?`。
-`components`：`[{path,x?,y?,z?,fixed?}]`（mm）；`mates`：`[{type,a:{component,plane},b:{component,plane},distance?,angle?,align?,flip?,lock_rotation?}]`，
+`components`：`[{path,x?,y?,z?,fixed?}]`（mm；**x/y/z 是组件几何中心**）；`mates`：`[{type,a:{component,plane},b:{component,plane},distance?,angle?,align?,flip?,lock_rotation?}]`，
 type 支持 coincident/concentric/perpendicular/parallel/tangent/distance/angle。
 返回：`doc`、`components[{name,path,fixed}]`、`mates[{type,name,a,b,error_status}]`、`mate_count`、`component_count`。
 
