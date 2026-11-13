@@ -21,14 +21,14 @@ Save As 后 `doc_id` 会变；危险动作未确认时返回 `CONFIRM_REQUIRED`�
 错误码：`GRAPH_INVALID`、`DOC_NOT_FOUND`、`DOC_BUSY`、`BUILD_FAILED`、`UNSUPPORTED`。
 
 ## cadw_measure
-参数：`doc`、`scope?: summary|mass|sketches|planes|tree|all`、`with_massprops?`。
+参数：`doc`、`scope?: summary|mass|sketches|planes|tree|all`、`with_massprops?`、`deep_sketches?`（默认 true，进入草图编辑模式只读约束状态）。
 返回：`bbox_mm`、`bbox_min_mm`、`bbox_max_mm`、`volume_mm3`（`volume_source: massprops|not_requested|unavailable`）、
 `surface_area_mm2`、`centroid_mm`、`solid_count`、`face_count`、`edge_count`、`feature_count`、
 `features[]`、`sketches[]`、`planes[]`。
 
 ## cadw_capture
 参数：`doc`、`views?`（iso/front/top/right/left/back/bottom）、`width?`、`height?`、
-`contact_sheet?`、`out_dir?`、`basename?`。
+`contact_sheet?`、`out_dir?`、`basename?`、`confirm?`（覆盖同名截图）。
 返回：`images[{view,path,width,height,stddev,unique_colors,white_ratio,blank}]`、`contact_sheet`、
 `image`/`imageNote`（等轴测内联）、`extraImage`/`extraImageNote`（拼图内联）。
 
@@ -39,7 +39,7 @@ Save As 后 `doc_id` 会变；危险动作未确认时返回 `CONFIRM_REQUIRED`�
 ## cadw_drawing
 参数：`doc`、`sheet?`、`scale?`、`views?`、`first_angle?`、`insert_model_dims?`、
 `export?`（pdf/dxf/dwg）、`out_dir?`、`basename?`、`confirm?`、`job_id?`。
-返回：`drawing_path`、`views[{name,annotations,position_m,scale}]`、`view_count`、`dimension_count`、
+返回：`drawing_path`、`views[{name,annotations,dimensions,position_m,scale}]`、`view_count`、`dimension_count`、`annotation_count`、
 `artifacts`、`warnings`。
 
 ## cadw_review

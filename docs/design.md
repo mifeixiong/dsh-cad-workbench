@@ -28,8 +28,8 @@
 | 校验实现 | 单一 Python 实现（scripts/graph.py） | 避免 JS/Python 两套规则漂移 |
 | 期望比对 | JS（lib/plan.js） | 纯函数、易测；结果写回台账 |
 | 文档身份 | 路径/标题的 sha256 前 16 位 | 不依赖 COM 指针生命周期；Save As 后令牌会变（显式） |
-| 回滚 | 按名删除本次新增特征 | 实测 EditUndo2 前几次空操作且会撤到用户特征；DeleteSelection2(0) 精确 |
-| 锁 | 文件 O_EXCL + pid 存活 + 900 s 失效 | 多会话/子代理串行；Windows 用 OpenProcess 判存活 |
+| 回滚 | 按名删除「当前 - 构建前快照」 | EditUndo2 会撤到用户特征；DeleteSelection2(0) 精确，失败节点残留也能清 |
+| 锁 | OS 文件锁（msvcrt/flock） | 进程崩溃由内核释放；无 stale 接管竞态 |
 | 图片 | SaveBMP→PNG + 像素统计 | 不依赖窗口截屏；自动识别空白/全黑 |
 | 错误 | ok:false + error{code,message,details} | 模型能按 code 决策；细节不丢 |
 | 工具面 | 9 个，cadw_ 前缀 | 覆盖全流程，避免与生态冲突 |

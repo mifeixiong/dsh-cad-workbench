@@ -16,6 +16,7 @@ import datetime
 import glob
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -62,6 +63,7 @@ EXIT_CODES = {
     'EXPORT_FAILED': 7,
     'UNSUPPORTED': 8,
     'TIMEOUT': 9,
+    'ROLLBACK_FAILED': 10,
 }
 
 
@@ -94,13 +96,24 @@ def read_spec():
         return json.load(handle)
 
 
+def _json_safe(value):
+    """把 NaN/±Infinity 转成 null，保证输出是合法 JSON（JSON.parse 不接受 NaN）。"""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def emit(payload):
     """输出且只输出一个 JSON 对象到 stdout。"""
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
-    text = json.dumps(payload, ensure_ascii=False, default=str)
+    text = json.dumps(_json_safe(payload), ensure_ascii=False, default=str, allow_nan=False)
     sys.stdout.write(text + '\n')
     sys.stdout.flush()
 
@@ -116,13 +129,23 @@ def run(handler):
     except CadError as error:
         result = error.envelope()
     except Exception as error:  # noqa: BLE001 - 边界处统一收口
-        detail = traceback.format_exc(limit=6)
+        log_path = None
+        try:
+            logs = ensure_dir(os.path.join(state_dir(), 'logs'))
+            log_path = os.path.join(logs, 'error-%s.log' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
+            with open(log_path, 'w', encoding='utf-8') as handle:
+                handle.write(traceback.format_exc())
+        except Exception:
+            log_path = None
+        details = {'exception': error.__class__.__name__}
+        if log_path:
+            details['log'] = log_path
         result = {
             'ok': False,
             'error': {
                 'code': 'INTERNAL',
                 'message': str(error) or error.__class__.__name__,
-                'details': {'traceback_tail': detail[-1800:]},
+                'details': details,
             },
         }
     emit(result)
@@ -142,6 +165,18 @@ def workspace_of(spec):
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def safe_basename(value, fallback='output'):
+    """文件名前缀消毒：去路径分隔符、.. 与 Windows 非法字符，保留中文。"""
+    raw = str(value or '').strip()
+    if not raw:
+        return fallback
+    cleaned = re.sub(r'[\\/]+', '-', raw)
+    cleaned = cleaned.replace('..', '-')
+    cleaned = re.sub(r'[:*?"<>|]', '-', cleaned)
+    cleaned = cleaned.strip(' .-')
+    return cleaned[:120] or fallback
 
 
 def sha256_file(path):
@@ -201,9 +236,13 @@ def _pid_alive(pid):
             pass
         try:
             import subprocess
-            output = subprocess.run(['tasklist', '/FI', 'PID eq %d' % pid, '/NH'],
+            output = subprocess.run(['tasklist', '/FI', 'PID eq %d' % pid, '/NH', '/FO', 'CSV'],
                                     capture_output=True, text=True, timeout=10).stdout
-            return str(pid) in output
+            for line in output.splitlines():
+                parts = [item.strip().strip('"') for item in line.split(',')]
+                if len(parts) > 1 and parts[1].isdigit() and int(parts[1]) == pid:
+                    return True
+            return False
         except Exception:
             return False
     try:
@@ -213,73 +252,120 @@ def _pid_alive(pid):
         return False
 
 
+def _try_os_lock(fd):
+    """尝试对 fd 加独占非阻塞锁；成功返回 True。
+
+    用 OS 文件锁而不是 O_EXCL + pid/TTL 启发式：进程崩溃由内核自动释放，
+    不存在「读到 stale → remove 前被别人抢到新锁」的 check-then-delete 竞态。
+    """
+    try:
+        if os.name == 'nt':
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _release_os_lock(fd):
+    try:
+        if os.name == 'nt':
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except Exception:
+        pass
+
+
+def _read_lock_info(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as stream:
+            return json.load(stream)
+    except Exception:
+        return {}
+
+
 @contextlib.contextmanager
 def sw_lock(tool, timeout_ms=None, stale_seconds=900, workspace=None):
-    """独占 SolidWorks 的跨进程锁（文件 O_EXCL）。等待超时抛 DOC_BUSY。"""
+    """独占 SolidWorks 的跨进程锁（OS 文件锁）。等待超时抛 DOC_BUSY。"""
     directory = ensure_dir(state_dir())
     path = os.path.join(directory, 'sw.lock')
     timeout = (timeout_ms if timeout_ms is not None
                else int(os.environ.get('CADW_LOCK_TIMEOUT_MS', '120000'))) / 1000.0
     deadline = time.time() + max(1.0, timeout)
-    token = '%s-%s-%s' % (os.getpid(), time.time(), tool)
+    fd = None
     while True:
         try:
-            handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(handle, 'w', encoding='utf-8') as stream:
-                json.dump({'pid': os.getpid(), 'tool': tool, 'token': token,
-                           'acquired_at': now_iso(), 'timestamp': time.time()}, stream)
+            fd = os.open(path, os.O_CREAT | os.O_RDWR)
+        except OSError as error:
+            raise CadError('DOC_BUSY', '无法打开 SolidWorks 锁文件：%s' % error)
+        if _try_os_lock(fd):
             break
-        except FileExistsError:
-            stale = False
-            info = {}
-            try:
-                with open(path, 'r', encoding='utf-8') as stream:
-                    info = json.load(stream)
-                age = time.time() - float(info.get('timestamp') or 0)
-                if age > stale_seconds or not _pid_alive(info.get('pid')):
-                    stale = True
-            except Exception:
-                stale = True
-            if stale:
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
-                continue
-            if time.time() >= deadline:
-                raise CadError(
-                    'DOC_BUSY',
-                    '另一个会话正在使用 SolidWorks（%s，pid=%s）。本工具最多等待 %.0f 秒；'
-                    '请稍后重试，或确认没有卡死的建模进程。'
-                    % (info.get('tool') or '未知工具', info.get('pid') or '?', timeout),
-                    {'lock': info},
-                )
-            time.sleep(0.5)
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        fd = None
+        if time.time() >= deadline:
+            info = _read_lock_info(path)
+            raise CadError(
+                'DOC_BUSY',
+                '另一个会话正在使用 SolidWorks（%s，pid=%s）。本工具最多等待 %.0f 秒；'
+                '请稍后重试，或确认没有卡死的建模进程。'
+                % (info.get('tool') or '未知工具', info.get('pid') or '?', timeout),
+                {'lock': info},
+            )
+        time.sleep(0.1)
     try:
+        info = {'pid': os.getpid(), 'tool': tool, 'token': '%s-%s' % (os.getpid(), time.time()),
+                'acquired_at': now_iso(), 'timestamp': time.time()}
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.ftruncate(fd, 0)
+            os.write(fd, json.dumps(info).encode('utf-8'))
+        except Exception:
+            pass
         yield
     finally:
         try:
-            with open(path, 'r', encoding='utf-8') as stream:
-                current = json.load(stream)
-            if current.get('token') == token:
-                os.remove(path)
-        except Exception:
-            pass
+            _release_os_lock(fd)
+        finally:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
 
 
 def lock_status():
+    """只读探测锁状态：真正试加一次 OS 锁，拿得到说明当前无人持有。"""
     path = os.path.join(state_dir(), 'sw.lock')
     if not os.path.isfile(path):
-        return {'held': False}
+        return {'held': False, 'method': 'os-lock'}
+    info = _read_lock_info(path)
+    fd = None
     try:
-        with open(path, 'r', encoding='utf-8') as stream:
-            info = json.load(stream)
+        fd = os.open(path, os.O_RDWR)
+        if _try_os_lock(fd):
+            _release_os_lock(fd)
+            return {'held': False, 'method': 'os-lock', 'last': info or None}
         info['held'] = True
-        info['stale'] = (time.time() - float(info.get('timestamp') or 0) > 900
-                         or not _pid_alive(info.get('pid')))
+        info['method'] = 'os-lock'
         return info
     except Exception:
         return {'held': True, 'unreadable': True}
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
 
 
 # --------------------------------------------------------------------------
@@ -435,10 +521,13 @@ def find_template(app, kind, prefer=None):
             continue
         for path in glob.glob(os.path.join(directory, '*' + extension)):
             candidates.append(path)
+    prefers = []
+    if prefer:
+        prefers = [str(item).lower() for item in (prefer if isinstance(prefer, (list, tuple)) else [prefer])]
     def score(path):
         lowered = os.path.basename(path).lower()
         value = 0
-        if prefer and prefer.lower() in lowered:
+        if any(token in lowered for token in prefers):
             value += 50
         if any(token in lowered for token in ('gb_', 'gb-', 'part', '零件')):
             value += 5
@@ -652,10 +741,7 @@ def end_sketch(model):
     except Exception:
         pass
     model.SketchManager.InsertSketch(True)
-    try:
-        model.ViewZoomtofit2()
-    except Exception:
-        pass
+    # 不在每次结束草图时 ZoomToFit：非视觉模式纯浪费；视觉模式由调用方显式 zoom。
     return last_sketch_name(model)
 
 
@@ -790,12 +876,12 @@ def select_sketch(model, name):
     return True
 
 
-def extrude(model, sketch_name, depth_mm, midplane=False):
+def extrude(model, sketch_name, depth_mm, midplane=False, flip=False):
     select_sketch(model, sketch_name)
     end_condition = _midplane_enum(model) if midplane else SW_END_BLIND
     feature = retry_busy(
         model.FeatureManager.FeatureExtrusion3,
-        True, False, False, end_condition, 0, float(depth_mm) * MM, 0,
+        True, bool(flip), False, end_condition, 0, float(depth_mm) * MM, 0,
         False, False, False, False, 0, 0,
         False, False, False, False, True, False, True,
         0, 0, False,
@@ -949,13 +1035,13 @@ def chamfer(model, distance_mm, edges, angle_deg=45.0):
     feature = None
     try:
         feature = model.FeatureManager.InsertFeatureChamfer(
-            0, SW_CHAMFER_ANGLE_DIST, float(distance_mm) * MM, float(angle_deg), 0, 0, 0, 0)
+            0, SW_CHAMFER_ANGLE_DIST, float(distance_mm) * MM, math.radians(float(angle_deg)), 0, 0, 0, 0)
     except Exception:
         feature = None
     if feature is None:
         try:
             feature = model.FeatureManager.FeatureChamferType(
-                SW_CHAMFER_ANGLE_DIST, float(distance_mm) * MM, float(angle_deg), False, 0, 0, 0, 0)
+                SW_CHAMFER_ANGLE_DIST, float(distance_mm) * MM, math.radians(float(angle_deg)), False, 0, 0, 0, 0)
         except Exception:
             feature = None
     if feature is None:
@@ -1058,7 +1144,7 @@ def chamfer_selected(model, distance_mm, angle_deg=45.0):
     feature = None
     try:
         feature = model.FeatureManager.InsertFeatureChamfer(
-            0, SW_CHAMFER_ANGLE_DIST, float(distance_mm) * MM, float(angle_deg), 0, 0, 0, 0)
+            0, SW_CHAMFER_ANGLE_DIST, float(distance_mm) * MM, math.radians(float(angle_deg)), 0, 0, 0, 0)
     except Exception:
         feature = None
     if feature is None:
@@ -1172,9 +1258,27 @@ def body_counts(model):
     return {'solid_count': solids, 'face_count': faces or None, 'edge_count': edges or None}
 
 
+PLANE_FAMILY_NAMES = {
+    'front plane': ('前视基准面', '前视基准面1'),
+    'top plane': ('上视基准面', '上视基准面1'),
+    'right plane': ('右视基准面', '右视基准面1'),
+}
+
+
+def plane_name_candidates(plane_name):
+    key = str(plane_name or '').strip()
+    candidates = [key]
+    for extra in PLANE_FAMILY_NAMES.get(key.lower(), ()):
+        if extra not in candidates:
+            candidates.append(extra)
+    return candidates
+
+
 def plane_axes_world(model, plane_name):
     """查基准面的世界轴向（IRefPlane::Transform）；查不到退回经验表并标注 source。"""
+    candidates = plane_name_candidates(plane_name)
     feature = None
+    matched_name = plane_name
     try:
         feature = model.FirstFeature
     except Exception:
@@ -1183,14 +1287,14 @@ def plane_axes_world(model, plane_name):
     while feature is not None and guard < 500:
         guard += 1
         try:
-            if str(_call_or_value(feature, 'Name')) == plane_name:
+            current_name = str(_call_or_value(feature, 'Name'))
+            if current_name in candidates:
+                matched_name = current_name
                 break
         except Exception:
             pass
         try:
             feature = feature.GetNextFeature
-            if callable(feature):
-                feature = feature()
         except Exception:
             feature = None
     raw = None
@@ -1214,7 +1318,7 @@ def plane_axes_world(model, plane_name):
             length = sum(value * value for value in vector) ** 0.5
             return [round(value / length, 6) for value in vector] if length else vector
         return {
-            'name': plane_name,
+            'name': matched_name,
             'source': 'IRefPlane::Transform',
             'normal_world': unit(normal),
             'sketch_x_world': unit(x_axis),
@@ -1253,30 +1357,91 @@ def sketch_audit(model):
 # --------------------------------------------------------------------------
 # 保存 / 导出
 # --------------------------------------------------------------------------
+def _snapshot(path):
+    try:
+        stat = os.stat(path)
+        return (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        return None
+
+
+def _written(path, before):
+    """本次确实写出：存在、非空，且（若原来已存在）mtime/size 与导出前不同。"""
+    if not os.path.isfile(path) or os.path.getsize(path) <= 0:
+        return False
+    if before is None:
+        return True
+    return _snapshot(path) != before
+
+
+def _set_aside(target):
+    """把已存在的目标改名备份，避免 SaveAs 失败时旧文件冒充新产物。"""
+    if not os.path.exists(target):
+        return None
+    backup = '%s.bak-%d-%d' % (target, os.getpid(), int(time.time() * 1000))
+    try:
+        os.replace(target, backup)
+        return backup
+    except Exception:
+        return None
+
+
+def _restore_backup(backup, target):
+    if backup and os.path.exists(backup):
+        try:
+            os.replace(backup, target)
+        except Exception:
+            pass
+
+
+def _drop_backup(backup):
+    if backup:
+        try:
+            os.remove(backup)
+        except Exception:
+            pass
+
+
+def _same_path(left, right):
+    try:
+        return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+    except Exception:
+        return False
+
+
 def save(model, path=None):
     if path:
         target = os.path.abspath(path)
         ensure_dir(os.path.dirname(target))
+        before = _snapshot(target)
+        backup = _set_aside(target)
         last = None
-        for options in (1, 0):
-            try:
-                retry_busy(model.SaveAs3, target, 0, options)
-            except Exception as error:  # noqa: BLE001
-                last = error
-            if os.path.isfile(target):
+        try:
+            for options in (1, 0):
+                try:
+                    retry_busy(model.SaveAs3, target, 0, options)
+                except Exception as error:  # noqa: BLE001
+                    last = error
                 identity = doc_identity(model)
-                if identity.get('path'):
+                if identity.get('path') and _same_path(identity['path'], target) and _written(target, before):
+                    _drop_backup(backup)
                     return {'path': target, 'bytes': os.path.getsize(target), 'doc': identity}
-        raise CadError('EXPORT_FAILED', '另存为失败：%s 未生成或未切换文档路径。' % target,
-                       {'last_error': str(last) if last else None})
+            raise CadError('EXPORT_FAILED', '另存为失败：%s 未生成或未切换文档路径。' % target,
+                           {'last_error': str(last) if last else None})
+        except Exception:
+            _restore_backup(backup, target)
+            raise
+    identity = doc_identity(model)
+    if not identity.get('path'):
+        raise CadError('UNSUPPORTED', '文档还没有保存到磁盘；请用 save_as 指定路径。')
     try:
         retry_busy(model.Save)
-        return {'path': doc_identity(model)['path'], 'bytes': None}
+        return {'path': identity['path'], 'bytes': None}
     except Exception as error:  # noqa: BLE001
         try:
             result = retry_busy(model.Save3, 1, 1, 0)
             if result == 0:
-                return {'path': doc_identity(model)['path'], 'bytes': None}
+                return {'path': identity['path'], 'bytes': None}
         except Exception:
             pass
         raise CadError('EXPORT_FAILED', '保存失败：%s' % error)
@@ -1299,25 +1464,31 @@ def export_document(model, target, overwrite=False):
     if os.path.exists(target) and not overwrite:
         raise CadError('EXPORT_FAILED', '目标已存在，拒绝覆盖：%s（确认覆盖请传 confirm=true）。' % target)
     ensure_dir(os.path.dirname(target))
+    before = _snapshot(target)
+    backup = _set_aside(target)
     last = None
-    for options in (1, 0, 2):
-        try:
-            retry_busy(model.Extension.SaveAs3, target, 0, options, None, None)
-        except Exception as error:  # noqa: BLE001
-            last = error
-        if os.path.isfile(target) and os.path.getsize(target) > 0:
-            return {'path': target, 'bytes': os.path.getsize(target)}
-        try:
-            retry_busy(model.SaveAs3, target, 0, options)
-        except Exception as error:  # noqa: BLE001
-            last = error
-        if os.path.isfile(target) and os.path.getsize(target) > 0:
-            return {'path': target, 'bytes': os.path.getsize(target)}
-    raise CadError(
-        'UNSUPPORTED',
-        '导出失败：%s 未生成（格式可能需要额外授权/转换器）。' % os.path.basename(target),
-        {'last_error': str(last) if last else None},
-    )
+    try:
+        for options in (1, 0, 2):
+            attempts = (
+                lambda: retry_busy(model.Extension.SaveAs3, target, 0, options, None, None),
+                lambda: retry_busy(model.SaveAs3, target, 0, options),
+            )
+            for attempt in attempts:
+                try:
+                    attempt()
+                except Exception as error:  # noqa: BLE001
+                    last = error
+                if _written(target, before):
+                    _drop_backup(backup)
+                    return {'path': target, 'bytes': os.path.getsize(target)}
+        raise CadError(
+            'UNSUPPORTED',
+            '导出失败：%s 未生成（格式可能需要额外授权/转换器）。' % os.path.basename(target),
+            {'last_error': str(last) if last else None},
+        )
+    except Exception:
+        _restore_backup(backup, target)
+        raise
 
 
 # --------------------------------------------------------------------------

@@ -88,22 +88,31 @@ def _view_name(view):
     return None
 
 
-def _view_annotations(view):
-    for attribute in ('GetAnnotationCount', 'GetDisplayDimensionCount', 'GetDimensionCount'):
-        try:
-            value = getattr(view, attribute)
-            value = value() if callable(value) else value
-            if value is not None:
-                return int(value)
-        except Exception:
-            continue
-    return None
+def _optional_int(view, attribute):
+    try:
+        value = getattr(view, attribute)
+        value = value() if callable(value) else value
+        return int(value) if value is not None else None
+    except Exception:
+        return None
+
+
+def _view_counts(view):
+    """注解数与尺寸数分开：GetAnnotationCount 含中心线/注释，不能当尺寸数。"""
+    annotations = _optional_int(view, 'GetAnnotationCount')
+    dimensions = None
+    for attribute in ('GetDisplayDimensionCount', 'GetDimensionCount'):
+        dimensions = _optional_int(view, attribute)
+        if dimensions is not None:
+            break
+    return annotations, dimensions
 
 
 def _view_list(drawing):
     views = []
     for view in _view_chain(drawing):
-        entry = {'name': _view_name(view), 'annotations': _view_annotations(view)}
+        annotations, dimensions = _view_counts(view)
+        entry = {'name': _view_name(view), 'annotations': annotations, 'dimensions': dimensions}
         try:
             position = view.Position
             entry['position_m'] = [round(float(value), 4) for value in position]
@@ -150,7 +159,11 @@ def main(spec):
         model_path = identity.get('path')
         if not model_path or not os.path.isfile(model_path):
             raise common.CadError('UNSUPPORTED', '源文档还没有保存到磁盘；请先用 cadw_session save_as 保存零件，再出工程图。')
-        template = common.find_template(app, 'drawing', prefer='gb_' + sheet.lower())
+        template = common.find_template(app, 'drawing', prefer=['gb_' + sheet.lower(), 'gb-' + sheet.lower()])
+        template_name = os.path.basename(template.get('path') or '').lower()
+        if template.get('path') and sheet.lower() not in template_name:
+            warnings.append('工程图模板 %s 不含图幅 %s；视图坐标按 %s 计算，可能与实际图纸不符。'
+                            % (os.path.basename(template['path']), sheet, sheet))
         if not template.get('path'):
             raise common.CadError('UNSUPPORTED', '找不到工程图模板（.drwdot）。', {'template': template})
         drawing = common.retry_busy(app.NewDocument, template['path'], 0, 0, 0)
@@ -170,7 +183,9 @@ def main(spec):
         if not inserted:
             raise common.CadError('BUILD_FAILED', '一个视图都没有插入成功。', {'warnings': warnings})
 
-        basename = spec.get('basename') or (os.path.splitext(identity.get('title') or 'drawing')[0] + '-drawing')
+        basename = common.safe_basename(
+            spec.get('basename') or (os.path.splitext(identity.get('title') or 'drawing')[0] + '-drawing'),
+            'drawing')
         drawing_path = os.path.join(out_dir, str(basename) + '.slddrw')
         if os.path.exists(drawing_path) and not overwrite:
             raise common.CadError('EXPORT_FAILED', '图纸已存在，拒绝覆盖：%s（确认请传 confirm=true）' % drawing_path)
@@ -189,6 +204,30 @@ def main(spec):
         if fresh is None:
             raise common.CadError('BUILD_FAILED', '图纸保存后找不到已打开副本：%s' % drawing_path)
 
+        scale_value = spec.get('scale')
+        if scale_value:
+            try:
+                scale_number = float(scale_value)
+                if scale_number <= 0:
+                    raise ValueError('scale 必须大于 0')
+                applied = 0
+                for view in _view_chain(fresh):
+                    try:
+                        view.ScaleDecimal = scale_number
+                        applied += 1
+                    except Exception:
+                        continue
+                if applied:
+                    try:
+                        fresh.EditRebuild3()
+                    except Exception:
+                        pass
+                    common.save(fresh)
+                else:
+                    warnings.append('设置视图比例失败（没有可用的视图对象）。')
+            except Exception as error:  # noqa: BLE001
+                warnings.append('设置视图比例失败：%s' % error)
+
         dimension_count = None
         if spec.get('insert_model_dims', True):
             for args in ((0, 2, True, True, True, True), (0, 0, True, True, True, True), (0, 1, True, True, True, True)):
@@ -206,13 +245,20 @@ def main(spec):
         common.save(fresh)
 
         view_entries = _view_list(fresh)
+        if scale_value:
+            try:
+                if float(scale_value) > 1:
+                    warnings.append('视图比例 >1，可能超出 %s 图幅；请打开 PDF/DXF 检查是否被裁切。' % sheet)
+            except Exception:
+                pass
         if len(view_entries) < len(inserted):
             warnings.append('插入 %d 个视图，但保存后只数到 %d 个。' % (len(inserted), len(view_entries)))
-        annotations = [entry.get('annotations') for entry in view_entries if entry.get('annotations')]
-        if annotations:
-            dimension_count = sum(annotations)
+        annotation_count = sum(entry.get('annotations') or 0 for entry in view_entries) or None
+        dimension_values = [entry.get('dimensions') for entry in view_entries if entry.get('dimensions')]
+        if dimension_values:
+            dimension_count = sum(dimension_values)
         elif spec.get('insert_model_dims', True):
-            warnings.append('模型尺寸导入后注解数为 0（可能是零件没有标注尺寸）。')
+            warnings.append('模型尺寸导入后尺寸数为 0（可能是零件没有标注尺寸）。')
 
         artifacts = []
         failures = []
@@ -242,6 +288,7 @@ def main(spec):
             'inserted': inserted,
             'view_count': len(view_entries),
             'dimension_count': dimension_count,
+            'annotation_count': annotation_count,
             'artifacts': artifacts,
             'failures': failures,
             'warnings': warnings + ['%s：%s' % (item['format'], item['message']) for item in failures],

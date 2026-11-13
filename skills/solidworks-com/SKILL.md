@@ -56,6 +56,7 @@ description: "SolidWorks COM 自动化事实与坑：后期绑定、模板探测
 - 旋转：`FeatureRevolve2(...)`，草图中必须有中心线。
 - 圆角：`FeatureFillet3(2, r, 0, 0, 0, 0, 0, None×7)`（Options=2 恒定半径）。
 - 倒角：优先 `InsertFeatureChamfer(0, 1, dist, angle, 0,0,0,0)`，失败回退 `FeatureChamferType`。
+  **angle 参数是弧度**：45° 要传 `math.radians(45)`；传 45 会变成 45 rad（实测去料翻倍）。
 - 失败时先看返回值是不是 None；不要假设"没抛异常就成功"。
 
 ## 特征树
@@ -70,6 +71,9 @@ description: "SolidWorks COM 自动化事实与坑：后期绑定、模板探测
 - `SaveAs3(path, 0, options)`：options=1 是静默另存并切换文档路径；options=2 是**保存副本**，
   文档路径不变（容易误判"保存成功但身份没变"）。
 - 无参保存用 `model.Save`；`Save3(1,1,0)` 在动态分派下可能"类型不匹配"。
+- `OpenDoc6(path, type, options, Configuration, Errors, Warnings)` 的 Configuration 不能省（传 `''`）。
+- 面草图世界坐标换算：`ModelToSketchTransform` 是 model→sketch，ArrayData 0..8 按**列主序**：
+  `s = R·p + t`；用逆变换/转置会把非前视平行面的孔镜像（实测 Top 面偏 20mm）。
 - 导出 STEP/IGES/STL/PDF 也是 `SaveAs3`，由扩展名决定格式；写完必须检查文件存在且非空。
 - 导出 DXF/DWG 需要工程图文档 + 转换器授权；失败要报 `UNSUPPORTED`，不要伪造文件。
 
@@ -86,6 +90,7 @@ description: "SolidWorks COM 自动化事实与坑：后期绑定、模板探测
 ## 回滚
 
 - `EditUndo2(1)` 有时前几次是空操作；不要无界循环，容易把用户之前的特征也撤掉。
+- 回滚用「构建前特征快照」，删除当前比快照多出来的全部特征（失败节点的残留草图也要删）。
 - 精确做法：记录本次新增的特征名 → 逆序 `SelectByID2(name, "BODYFEATURE") → Extension.DeleteSelection2(0)`；
   这次实测有效。`EditDelete` 在这台机器上不生效。
 - 回滚后必须 `ForceRebuild3(False)` 并复验特征数。

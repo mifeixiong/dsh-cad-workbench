@@ -22,10 +22,18 @@ def main(spec):
     workspace = common.workspace_of(spec)
     out_dir = os.path.abspath(spec.get('out_dir') or os.path.join(workspace, 'cad-output', 'captures'))
     common.ensure_dir(out_dir)
-    basename = str(spec.get('basename') or 'capture')
-    width = int(spec.get('width') or 1600)
-    height = int(spec.get('height') or 1000)
-    requested = [VIEW_ALIASES.get(str(item).lower(), str(item)) for item in (spec.get('views') or ['iso'])]
+    basename = common.safe_basename(spec.get('basename'), 'capture')
+    width = max(200, min(4000, int(spec.get('width') or 1600)))
+    height = max(150, min(3000, int(spec.get('height') or 1000)))
+    requested = list(dict.fromkeys(
+        VIEW_ALIASES.get(str(item).lower(), str(item)) for item in (spec.get('views') or ['iso'])))
+    planned = [os.path.join(out_dir, '%s-%s.png' % (basename, view)) for view in requested]
+    if spec.get('contact_sheet') and len(requested) > 1:
+        planned.append(os.path.join(out_dir, '%s-contact.png' % basename))
+    existing = [path for path in planned if os.path.isfile(path)]
+    if existing and not spec.get('overwrite'):
+        raise common.CadError('EXPORT_FAILED',
+                              '截图目标已存在，拒绝覆盖：%s（确认覆盖请传 confirm=true）' % '；'.join(existing[:3]))
     with common.sw_lock('sw_capture', workspace=workspace):
         app = common.attach(launch=False)
         model, identity = common.find_document(app, spec.get('doc'))

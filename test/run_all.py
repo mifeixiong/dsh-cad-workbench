@@ -26,8 +26,13 @@ def run(label, command, cwd=ROOT):
 def main():
     python = sys.executable
     codes = []
+    codes.append(run('common_cases', [python, os.path.join(HERE, 'common_cases.py')]))
     codes.append(run('graph_cases', [python, os.path.join(HERE, 'graph_cases.py')]))
     codes.append(run('review_cases', [python, os.path.join(HERE, 'review_cases.py')]))
+    if '--python-only' in sys.argv:
+        failed = sum(1 for code in codes if code != 0)
+        print('\n总计 %d 项，失败 %d（--python-only）' % (len(codes), failed))
+        return 1 if failed else 0
     node = shutil.which('node')
     if node:
         codes.append(run('selftest', [node, '--test', os.path.join(HERE, 'selftest.mjs')]))

@@ -34,9 +34,22 @@ CASES = [
         {'op': 'fillet', 'radius': 1, 'edges': 'all'},
     ]}, True, None),
     ('revolve_centerline', {'units': 'mm', 'nodes': [
-        {'op': 'sketch', 'entities': [rect(10, 10)],
+        {'op': 'sketch', 'entities': [{'type': 'rect', 'center': [5, 5], 'width': 10, 'height': 10}],
          'centerline': [[0, 0], [0, 20]]},
         {'op': 'revolve', 'angle': 180},
+    ]}, True, None),
+    ('revolve_crosses_axis', {'units': 'mm', 'nodes': [
+        {'op': 'sketch', 'entities': [rect(10, 10)],
+         'centerline': [[0, 0], [0, 20]]},
+        {'op': 'revolve'},
+    ]}, False, '跨越'),
+    ('cut_both_directions', {'units': 'mm', 'nodes': [
+        {'op': 'sketch', 'entities': [rect()]},
+        {'op': 'cut', 'depth': 2, 'both_directions': True},
+    ]}, False, 'both_directions'),
+    ('extrude_flip', {'units': 'mm', 'nodes': [
+        {'op': 'sketch', 'entities': [rect()]},
+        {'op': 'extrude', 'depth': 2, 'flip': True},
     ]}, True, None),
     ('polyline_auto_close', {'units': 'mm', 'nodes': [
         {'op': 'sketch', 'entities': [
@@ -90,10 +103,10 @@ CASES = [
         {'op': 'sketch', 'entities': [rect()]},
         {'op': 'revolve'},
     ]}, False, 'centerline'),
-    ('cut_default_depth', {'units': 'mm', 'nodes': [
+    ('cut_depth_required', {'units': 'mm', 'nodes': [
         {'op': 'sketch', 'entities': [rect()]},
-        {'op': 'cut', 'depth': 3},
-    ]}, True, None),
+        {'op': 'cut'},
+    ]}, False, 'depth'),
     ('cut_through', {'units': 'mm', 'nodes': [
         {'op': 'sketch', 'entities': [rect()]},
         {'op': 'cut', 'through_all': True},

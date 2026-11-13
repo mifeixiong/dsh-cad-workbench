@@ -48,6 +48,10 @@ Live acceptance on Windows 11 + SOLIDWORKS 2024 SP0.1: **31/31 checks pass**
 (plate with through hole and fillets, measured bbox/volume, four views, STEP/STL/PDF,
 A3 drawing, DXF/STEP/STL review, precise rollback, stale-token rejection, lock contention).
 
+v0.1.1 audit regressions: **10/10** — top-face hole placement, chamfer 125 mm³, closed
+polyline, partial-feature rollback, open/save. Cross-process lock is now an OS file lock;
+exports no longer accept a stale pre-existing file as success.
+
 Offline: `python test/run_all.py` — JS contract tests plus Python graph/review cases.
 
 ## Limits (v0.1)

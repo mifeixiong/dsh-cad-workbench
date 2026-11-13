@@ -10,16 +10,15 @@
 
 ## 并发
 
-- 文件锁 `%LOCALAPPDATA%\\dsh-cad-workbench\\sw.lock`：`O_CREAT|O_EXCL` 抢占，
-  记录 pid/工具/时间戳；等待默认 120 s；超时 `DOC_BUSY`。
-- 持锁进程死亡或锁龄 > 900 s 视为失效并接管。
-- Windows 的 pid 存活用 `OpenProcess + GetExitCodeProcess` 判断（`os.kill(pid,0)` 不可靠）。
+- 锁文件 `%LOCALAPPDATA%\\dsh-cad-workbench\\sw.lock` 只承载元信息；真正的互斥是 **OS 文件锁**
+  （Windows `msvcrt.locking` / POSIX `flock`），等待默认 120 s，超时 `DOC_BUSY`。
+- 进程崩溃由内核自动释放锁：没有 pid/TTL 启发式，也没有 check-then-delete 竞态。
 - 多会话/子代理同时建模时串行执行，不会把特征画到对方文档。
 
 ## 回滚
 
-- 建模前记录特征数；每个节点记录"新增特征名"。
-- 失败时逆序按名删除（`SelectByID2 → DeleteSelection2(0)`），再 `ForceRebuild3` 复验。
+- 建模前记录完整特征名快照；失败时删除「当前 - 快照」的全部特征（含失败节点残留的草图）。
+- 按名删除（`SelectByID2 → DeleteSelection2(0)`），再 `ForceRebuild3` 复验特征数。
 - 只删本次新增，不碰用户原有特征；删除失败才退到 `EditUndo2`，且有界。
 - 回滚失败返回 `ROLLBACK_FAILED` 并保留现场，不静默关闭文档。
 

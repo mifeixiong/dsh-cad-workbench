@@ -41,3 +41,26 @@
 - `EditUndo2` 前几次为空操作，且可能撤到用户特征；改用按名删除回滚。
 - `EditDelete` 不生效，`Extension.DeleteSelection2(0)` 有效。
 - `os.kill(pid,0)` 在 Windows 不可靠，改用 OpenProcess 判存活。
+## 审计回归（2026-11-13，v0.1.1）
+
+三个子代理并行审计后，按报告修复并回归：
+
+| 项 | 结果 |
+|---|---|
+| Top 平面拉伸件 y=10 面 Ø10 孔 @ (20,10,-15) | 孔心质心 x=-0.1650 / z=+0.1237（解析值 -0.16496 / +0.12372） |
+| 倒角 45° / 距离 5 / 一条竖边 | 去料 125.000 mm³（解析 125） |
+| 闭合 polyline 拉伸 | 体积 200.000 mm³，无零长段 |
+| hole 选面失败回滚 | features 20 → 20，rollback.done=true |
+| open 已保存 sldprt + save | 返回 doc_id，保存成功 |
+| 双进程抢锁 | 30 轮无重叠（OS 文件锁），等待方 DOC_BUSY |
+| 导出目标预存在 + SaveAs 无操作 | 抛 UNSUPPORTED，旧文件内容/mtime 恢复，无 .bak 残留 |
+| DXF MTEXT char_height=1.0 | text_height WARN（不再假阴性） |
+| 草图审计 | 段数 4 / 点数 4 / constrained_status=2（under_defined） |
+
+命令：
+
+	python test/run_all.py
+	python test/live_regressions.py --workspace E:\code\_cad_verify\live_reg3
+	python test/live_smoke.py --workspace E:\code\_cad_verify\live2
+
+审计报告（仓库外）：`E:\code\_cad_verify\reviews\audit-static.md`、`audit-live.md`、`efficiency.md`。

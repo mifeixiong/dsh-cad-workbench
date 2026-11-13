@@ -28,12 +28,22 @@ def make_good_dxf(path):
     msp.add_line((0, 0), (100, 0), dxfattribs={'layer': 'OUTLINE'})
     msp.add_line((100, 0), (100, 60), dxfattribs={'layer': 'OUTLINE'})
     msp.add_text('TEST', height=3.5, dxfattribs={'layer': 'TEXT'}).set_placement((10, 10))
+    msp.add_mtext('NOTE', dxfattribs={'layer': 'TEXT', 'char_height': 3.5}).set_location((10, 20))
     msp.add_linear_dim(base=(0, -10), p1=(0, 0), p2=(100, 0),
                        dxfattribs={'layer': 'DIM'}).render()
     msp.add_linear_dim(base=(110, 0), p1=(100, 0), p2=(100, 60),
                        dxfattribs={'layer': 'DIM'}).render()
     msp.add_linear_dim(base=(0, -20), p1=(0, 0), p2=(100, 60),
                        dxfattribs={'layer': 'DIM'}).render()
+    doc.saveas(path)
+
+
+def make_small_mtext_dxf(path):
+    import ezdxf
+    doc = ezdxf.new('R2010')
+    doc.header['$INSUNITS'] = 4
+    msp = doc.modelspace()
+    msp.add_mtext('SMALL', dxfattribs={'layer': '0', 'char_height': 1.0}).set_location((0, 0))
     doc.saveas(path)
 
 
@@ -100,6 +110,12 @@ def main():
         ids = {item['id']: item['status'] for item in result['checks']}
         if ids.get('zero_length') != 'FAIL':
             failures.append('bad.dxf 的零长线检查应为 FAIL，实际 %s' % ids.get('zero_length'))
+        mtext = os.path.join(tmp, 'small-mtext.dxf')
+        make_small_mtext_dxf(mtext)
+        result = cad_review.review_dxf(mtext, rules)
+        ids = {item['id']: item['status'] for item in result['checks']}
+        if ids.get('text_height') != 'WARN':
+            failures.append('MTEXT char_height=1.0 应触发 text_height WARN，实际 %s' % ids.get('text_height'))
     except ImportError:
         print('review_cases: 跳过 DXF（未安装 ezdxf）')
 

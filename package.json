@@ -1,6 +1,6 @@
 {
   "name": "dsh-cad-workbench",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "机械 CAD 工作台：SolidWorks 声明式建模、实测校核、视图自检、工程图与 DXF/STEP/STL 审查（DeepSeek Harness 插件）。",
   "type": "module",
   "main": "index.js",

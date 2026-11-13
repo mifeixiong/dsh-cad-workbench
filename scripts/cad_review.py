@@ -42,6 +42,8 @@ def _load_rules(overrides):
             rules = json.load(handle)
     except Exception:
         rules = {}
+    if overrides is not None and not isinstance(overrides, dict):
+        raise common.CadError('BAD_ARGS', 'rules 必须是对象（可只给要覆盖的字段）')
     if overrides:
         for key, value in overrides.items():
             if isinstance(value, dict) and isinstance(rules.get(key), dict):
@@ -149,23 +151,23 @@ def review_dxf(path, rules):
             if length < 1e-6:
                 zero_length.append('%s 零长线 @%s' % (entity.dxf.handle, [round(start.x, 3), round(start.y, 3)]))
             else:
-                key = (entity.dxf.layer, tuple(round(value, 4) for value in (start.x, start.y, end.x, end.y)))
-                reverse = (entity.dxf.layer, tuple(round(value, 4) for value in (end.x, end.y, start.x, start.y)))
+                endpoints = sorted([(round(start.x, 4), round(start.y, 4)),
+                                    (round(end.x, 4), round(end.y, 4))])
+                key = (entity.dxf.layer, tuple(endpoints))
                 segments[key] = segments.get(key, 0) + 1
-                segments[reverse] = segments.get(reverse, 0) + 1
     max_zero = int(entity_rule.get('max_zero_length', 0))
     if len(zero_length) > max_zero:
         checks.append(_check('zero_length', 'FAIL', '存在 %d 条零长直线。' % len(zero_length),
                              count=len(zero_length), samples=zero_length))
     else:
         checks.append(_check('zero_length', 'PASS', '没有零长直线。'))
-    duplicates = sum(1 for count in segments.values() if count > 1) // 2
+    duplicates = sum(count * (count - 1) // 2 for count in segments.values())
     max_duplicates = int(entity_rule.get('max_duplicate_pairs', 0))
     if duplicates > max_duplicates:
         checks.append(_check('duplicates', 'WARN' if duplicates <= max_duplicates + 5 else 'FAIL',
                              '发现 %d 对重复线段（同图层同端点）。' % duplicates, count=duplicates))
     else:
-        checks.append(_check('duplicates', 'PASS', '没有重复线段。'))
+        checks.append(_check('duplicates', 'PASS', '没有重复线段（0 对）。', count=0))
 
     dims_rule = rules.get('dimensions', {})
     dimension_count = counts.get('DIMENSION', 0) + counts.get('ARC_DIMENSION', 0)
@@ -187,7 +189,10 @@ def review_dxf(path, rules):
             value = ''
         if not str(value).strip():
             empty.append(entity.dxf.handle)
-        height = float(getattr(entity.dxf, 'height', 0) or 2.5)
+        if entity.dxftype() == 'MTEXT':
+            height = float(entity.dxf.get('char_height', 0) or 2.5)
+        else:
+            height = float(getattr(entity.dxf, 'height', 0) or 2.5)
         if min_height and height < min_height:
             small.append('%s=%.2fmm' % (str(value)[:12], height))
     if small:
@@ -312,7 +317,10 @@ def review_step(path):
     checks = []
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as handle:
-            text = handle.read(8 * 1024 * 1024)
+            limit = 8 * 1024 * 1024
+            text = handle.read(limit + 1)
+            truncated = len(text) > limit
+            text = text[:limit]
     except Exception as error:  # noqa: BLE001
         return {'ok': False, 'path': path, 'kind': 'step', 'verdict': 'FAIL',
                 'checks': [_check('read', 'FAIL', 'STEP 读取失败：%s' % error)]}
@@ -354,6 +362,10 @@ def review_step(path):
         bbox_check['heuristic'] = True
     checks.append(bbox_check)
     entity_count = len(re.findall(r'^#\d+\s*=', text, re.MULTILINE))
+    if truncated:
+        checks.append(_check('truncated', 'WARN',
+                             'STEP 超过 8MB，只统计了前 8MB；实体数与包围盒可能偏小。',
+                             hint='精确审查请用 CAD 软件打开，或拆分 STEP。'))
     return {
         'ok': True,
         'path': path,
@@ -368,6 +380,8 @@ def review_step(path):
 
 def main(spec):
     paths = [os.path.abspath(item) for item in (spec.get('paths') or [])]
+    if not paths:
+        raise common.CadError('BAD_ARGS', '至少需要一个文件路径')
     rules = _load_rules(spec.get('rules'))
     files = []
     for path in paths:

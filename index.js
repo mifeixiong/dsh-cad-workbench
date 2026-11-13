@@ -42,6 +42,7 @@ import {
   displayPath,
   ensureDir,
   guardOutputPath,
+  sanitizeBasename,
   stamp,
   workspaceOf,
 } from './lib/session.js'
@@ -76,7 +77,13 @@ function defineTool(definition) {
   if (typeof execute !== 'function') return rawDefineTool(definition)
   return rawDefineTool({
     ...definition,
-    execute: async (...args) => toLossless(await execute(...args)),
+    execute: async (...args) => {
+      try {
+        return toLossless(await execute(...args))
+      } catch (error) {
+        return toLossless(fail(error?.code || 'INTERNAL', String(error?.message ?? error)))
+      }
+    },
   })
 }
 
@@ -199,7 +206,7 @@ function registerTools(ctx) {
         visual: args.visual !== false,
       }
       if (args.path) {
-        if (args.action === 'save_as') {
+        if (args.action === 'save_as' || args.action === 'save') {
           const target = guardOutputPath(workspace, resolve(workspace, String(args.path)), {
             allowOutside: args.allow_outside === true,
             overwrite: args.confirm === true,
@@ -232,7 +239,7 @@ function registerTools(ctx) {
       '再在 Undo 事务内逐节点执行；失败自动回滚并复验特征数。传 expect（包围盒/体积/特征数）时，' +
       '建完按实测逐轴比对，容差 max(1 mm, 2%)，不符返回 PLAN_MISMATCH。',
     parameters: {
-      doc: { type: 'string', required: true, description: '文档令牌 doc_id（来自 cadw_session）' },
+      doc: { type: 'string', description: '文档令牌 doc_id（来自 cadw_session；dry_run 时可省略）' },
       graph: { type: 'json', required: true, description: 'Feature Graph：{units:"mm", nodes:[{op:"sketch",...},{op:"extrude",depth:10}]}' },
       dry_run: { type: 'boolean', description: '只校验与生成计划，不碰 SolidWorks（默认 false）' },
       visual: { type: 'boolean', description: '每步特征后置前并展示等轴测（默认 false；慢）' },
@@ -245,6 +252,9 @@ function registerTools(ctx) {
     output: { schema: OUTPUT_SCHEMA, render: renderResult },
     async execute(args, exec) {
       const workspace = workspaceOf(args, exec, ctx)
+      if (args.dry_run !== true && !args.doc) {
+        return fail('BAD_ARGS', 'cadw_model 需要 doc（来自 cadw_session）；只有 dry_run=true 可以省略。')
+      }
       let graph
       try {
         graph = normalizeGraph(args.graph)
@@ -257,7 +267,7 @@ function registerTools(ctx) {
       }
       const spec = {
         workspace,
-        doc: args.doc,
+        doc: args.doc ?? null,
         graph,
         dry_run: args.dry_run === true,
         visual: args.visual === true,
@@ -269,6 +279,8 @@ function registerTools(ctx) {
         timeoutMs: 880000,
       })
       if (result.ok === false) return result
+      // graph_hash 以 Python 校验后规范化图为准；原文 hash 另存，避免同一张图两个值。
+      result.graph_hash_input = graphHash(graph)
       if (!spec.dry_run) {
         const measured = {
           ...(result.measurements ?? {}),
@@ -279,21 +291,31 @@ function registerTools(ctx) {
       if (args.job_id) {
         const job = await getJob(workspace, args.job_id)
         if (!job) return fail('JOB_NOT_FOUND', '作业不存在：' + args.job_id)
-        result.graph_hash = graphHash(graph)
         result.job_id = job.job_id
         await recordEvent(workspace, job.job_id, {
           tool: 'cadw_model',
-          ok: true,
+          ok: result.verification?.status !== 'mismatch',
           dry_run: spec.dry_run,
           graph_hash: result.graph_hash,
+          graph_hash_input: result.graph_hash_input,
           node_count: graph.nodes.length,
           features_before: result.features_before ?? null,
           features_after: result.features_after ?? null,
         })
-        await recordVerification(workspace, job.job_id, {
-          status: result.verification?.status ?? 'unverified',
-          checks: result.verification?.checks ?? [],
-          failures: result.verification?.failures ?? [],
+        if (!spec.dry_run && result.verification) {
+          await recordVerification(workspace, job.job_id, {
+            status: result.verification.status,
+            checks: result.verification.checks,
+            failures: result.verification.failures,
+          })
+        }
+      }
+      if (!spec.dry_run && result.verification?.status === 'mismatch') {
+        return fail('PLAN_MISMATCH', '实测与 expect 不符：' + (result.verification.failures ?? []).join('；'), {
+          verification: result.verification,
+          measurements: result.measurements,
+          created: result.created,
+          graph_hash: result.graph_hash,
         })
       }
       result.summary = modelSummary(result)
@@ -306,12 +328,13 @@ function registerTools(ctx) {
     name: 'cadw_measure',
     description:
       '读取指定 SolidWorks 文档的几何事实：包围盒（mm）、体积/表面积/质心（需 with_massprops=true，' +
-      'massprops 在部分机器上可能卡死，默认关闭）、实体/面/边数量、特征树、草图全定义审计、' +
+      'massprops 在部分机器上可能卡死，默认关闭）、实体/面/边数量、特征树、草图段数/约束状态（全定义审计，进入编辑模式只读）、' +
       '基准面世界轴（查 IRefPlane 变换，查不到才退回经验表并标注 source）。',
     parameters: {
       doc: { type: 'string', required: true, description: '文档令牌 doc_id' },
       scope: { type: 'string', description: 'summary | mass | sketches | planes | tree | all（默认 summary）' },
       with_massprops: { type: 'boolean', description: '是否读取质量属性（默认 false；可能卡住 SolidWorks）' },
+      deep_sketches: { type: 'boolean', description: 'scope 含 sketches 时是否进入草图编辑模式读约束状态/段数（默认 true；只读，不修改几何）' },
       workspace: { type: 'string', description: '工作区根目录' },
     },
     timeoutMs: 240000,
@@ -323,6 +346,7 @@ function registerTools(ctx) {
         doc: args.doc,
         scope: args.scope ?? 'summary',
         with_massprops: args.with_massprops === true,
+        deep_sketches: args.deep_sketches !== false,
       }, { requirement: 'com', timeoutMs: 210000 })
       if (result.ok === false) return result
       const bbox = result.bbox_mm
@@ -351,6 +375,7 @@ function registerTools(ctx) {
       contact_sheet: { type: 'boolean', description: '是否生成 2×2 拼图（默认 true）' },
       out_dir: { type: 'string', description: '输出目录；缺省 <workspace>/cad-output' },
       basename: { type: 'string', description: '文件名前缀' },
+      confirm: { type: 'boolean', description: '允许覆盖同名截图（默认拒绝）' },
       workspace: { type: 'string', description: '工作区根目录' },
     },
     timeoutMs: 300000,
@@ -366,7 +391,8 @@ function registerTools(ctx) {
         height: Number(args.height) || 1000,
         contact_sheet: args.contact_sheet !== false,
         out_dir: outDir,
-        basename: args.basename ?? 'capture-' + stamp(),
+        basename: sanitizeBasename(args.basename, 'capture-' + stamp()),
+        overwrite: args.confirm === true,
       }, { requirement: ['win32com', 'PIL'], timeoutMs: 280000 })
       if (result.ok === false) return result
       const images = Array.isArray(result.images) ? result.images : []
@@ -414,13 +440,19 @@ function registerTools(ctx) {
         doc: args.doc,
         formats,
         out_dir: outDir,
-        basename: args.basename ?? null,
+        basename: args.basename ? sanitizeBasename(args.basename, 'export') : null,
         overwrite: args.confirm === true,
       }, { requirement: 'com', timeoutMs: 340000 })
       if (result.ok === false) return result
       for (const item of result.artifacts ?? []) {
         item.sha256 = fileSha256(item.path)
         item.bytes = item.bytes ?? null
+      }
+      if (!(result.artifacts ?? []).length) {
+        return fail('EXPORT_FAILED', '所有格式都导出失败：' +
+          (result.failures ?? []).map((item) => item.format + '=' + item.code).join('；'), {
+          failures: result.failures ?? [],
+        })
       }
       if (args.job_id) {
         const job = await getJob(workspace, args.job_id)
@@ -471,7 +503,7 @@ function registerTools(ctx) {
         insert_model_dims: args.insert_model_dims !== false,
         export: Array.isArray(args.export) && args.export.length ? args.export : ['pdf'],
         out_dir: outDir,
-        basename: args.basename ?? null,
+        basename: args.basename ? sanitizeBasename(args.basename, 'drawing') : null,
         overwrite: args.confirm === true,
       }, { requirement: 'com', timeoutMs: 580000 })
       if (result.ok === false) return result
@@ -570,6 +602,8 @@ function registerTools(ctx) {
       const workspace = workspaceOf(args, exec, ctx)
       const action = String(args.action ?? '')
       try {
+        // 台账也必须过系统目录守卫：workspace 若指向 C:Windows 之类，不能在那里建 .cad-workbench。
+        guardOutputPath(workspace, join(workspace, '.cad-workbench', 'jobs', '.probe'), { overwrite: true })
         if (action === 'start') {
           const job = await startJob(workspace, {
             job_id: args.job_id ? String(args.job_id) : newJobId(args.name ? 'cad' : 'job'),
@@ -581,6 +615,9 @@ function registerTools(ctx) {
         }
         if (action === 'record') {
           if (!args.job_id) return fail('BAD_ARGS', 'record 需要 job_id')
+          if (args.artifacts !== undefined && !Array.isArray(args.artifacts)) {
+            return fail('BAD_ARGS', 'record 的 artifacts 必须是数组')
+          }
           let job
           if (args.artifacts) job = await recordArtifacts(workspace, String(args.job_id), args.artifacts)
           job = await recordEvent(workspace, String(args.job_id), args.event ?? { tool: 'cadw_job', ok: true })

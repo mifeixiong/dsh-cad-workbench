@@ -154,6 +154,56 @@ def _entity(entity, node, index):
     _fail('未处理的实体类型：%s' % kind, node, path)
 
 
+def _profile_points(entity):
+    kind = entity.get('type')
+    if kind == 'rect':
+        cx, cy = entity['center']
+        half_w, half_h = entity['width'] / 2.0, entity['height'] / 2.0
+        return [(cx - half_w, cy - half_h), (cx + half_w, cy - half_h),
+                (cx + half_w, cy + half_h), (cx - half_w, cy + half_h)]
+    if kind == 'polyline':
+        return [tuple(point) for point in entity['points']]
+    if kind == 'polygon':
+        import math
+        cx, cy = entity['center']
+        radius = entity['radius']
+        rotation = entity.get('rotation', 0)
+        return [(cx + radius * math.cos(math.radians(rotation + 360.0 * index / entity['sides'])),
+                 cy + radius * math.sin(math.radians(rotation + 360.0 * index / entity['sides'])))
+                for index in range(entity['sides'])]
+    if kind == 'circle':
+        cx, cy = entity['center']
+        radius = entity['radius']
+        return [(cx - radius, cy), (cx + radius, cy), (cx, cy - radius), (cx, cy + radius)]
+    return []
+
+
+def _check_revolve_profile(sketch_node, index, path):
+    """旋转轮廓不能同时出现在中心线两侧（会自交；SolidWorks 不报错但几何错）。"""
+    centerline = sketch_node.get('centerline')
+    if not centerline:
+        for entity in sketch_node.get('entities', []):
+            if entity.get('type') == 'centerline':
+                centerline = [entity['from'], entity['to']]
+                break
+    if not centerline:
+        return
+    (x1, y1), (x2, y2) = centerline
+    dx, dy = x2 - x1, y2 - y1
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        _fail('revolve 的中心线长度为零', index, path)
+    sides = []
+    for entity in sketch_node.get('entities', []):
+        for px, py in _profile_points(entity):
+            sides.append(dx * (py - y1) - dy * (px - x1))
+    if not sides:
+        return
+    tolerance = 1e-6
+    if max(sides) > tolerance and min(sides) < -tolerance:
+        _fail('旋转轮廓跨越中心线（两侧都有材料），会自交或失败', index, path,
+              hint='把轮廓全部放在中心线一侧（贴轴或离轴）。')
+
+
 def validate(graph):
     if isinstance(graph, str):
         try:
@@ -259,9 +309,17 @@ def validate(graph):
                 if not isinstance(through, bool):
                     _fail('through_all 必须是布尔值', index, path)
                 base['through_all'] = through
-                base['depth'] = None if through else _number(node.get('depth', 10), 'depth', index, path, minimum=1e-6)
+                if through:
+                    base['depth'] = None
+                else:
+                    if node.get('depth') is None:
+                        _fail('盲切必须显式给 depth（或用 through_all:true）', index, path)
+                    base['depth'] = _number(node.get('depth'), 'depth', index, path, minimum=1e-6)
                 base['flip'] = bool(node.get('flip', False))
-                base['both_directions'] = bool(node.get('both_directions', False))
+                both = node.get('both_directions', False)
+                if both:
+                    _fail('v0.1 不支持 cut.both_directions（请用两次 cut 或调整 flip）', index, path)
+                base['both_directions'] = False
 
         elif op == 'revolve':
             sketch_ref = node.get('sketch')
@@ -284,6 +342,7 @@ def validate(graph):
             has_centerline = any(entity.get('type') == 'centerline' for entity in sketch_node.get('entities', []))
             if not has_centerline and 'centerline' not in sketch_node:
                 _fail('revolve 的草图必须包含 centerline 实体作为旋转轴', index, path)
+            _check_revolve_profile(sketch_node, index, path)
             angle = _number(node.get('angle', 360), 'angle', index, path, minimum=0.1, maximum=360)
             kind = node.get('type', 'boss')
             if kind not in ('boss', 'cut'):

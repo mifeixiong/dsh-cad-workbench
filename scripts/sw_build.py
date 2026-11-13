@@ -44,12 +44,11 @@ def _world_to_sketch(active_sketch, x_mm, y_mm, z_mm):
         )
     if len(data) < 12:
         raise common.CadError('UNSUPPORTED', '草图变换数组长度异常：%d' % len(data))
-    rotation = data[0:9]
-    translation = data[9:12]
-    px, py, pz = x_mm * common.MM - translation[0], y_mm * common.MM - translation[1], z_mm * common.MM - translation[2]
-    # 旋转矩阵按列主序：new = R^T * (p - t)，再 ×1000 转 mm
-    sx = (rotation[0] * px + rotation[1] * py + rotation[2] * pz) * 1000.0
-    sy = (rotation[3] * px + rotation[4] * py + rotation[5] * pz) * 1000.0
+    # IModelToSketchTransform 是「模型 → 草图」，ArrayData 的 0..8 按**列主序**存旋转，
+    # 9..11 是平移：s = R·p + t。实测（Top 面 y=10）用 R^T(p-t) 会把孔位镜像 20mm。
+    px, py, pz = x_mm * common.MM, y_mm * common.MM, z_mm * common.MM
+    sx = (data[0] * px + data[3] * py + data[6] * pz + data[9]) * 1000.0
+    sy = (data[1] * px + data[4] * py + data[7] * pz + data[10]) * 1000.0
     return sx, sy
 
 
@@ -59,7 +58,18 @@ def _sketch_node(model, node):
     plane_name = None if face else plane
     common.start_sketch(model, plane=plane_name, face=face.get('face') if face else None)
     manager = model.SketchManager
-    common.sketch_entities(manager, node.get('entities', []))
+    # AddToDB：跳过推理/捕捉求解，显著加快实体创建；结束草图时 MergePoints 负责缝合端点。
+    try:
+        manager.AddToDB = True
+    except Exception:
+        pass
+    try:
+        common.sketch_entities(manager, node.get('entities', []))
+    finally:
+        try:
+            manager.AddToDB = False
+        except Exception:
+            pass
     if node.get('centerline'):
         (x1, y1), (x2, y2) = node['centerline']
         manager.CreateCenterLine(x1 * common.MM, y1 * common.MM, 0, x2 * common.MM, y2 * common.MM, 0)
@@ -76,7 +86,8 @@ def execute_node(model, node, built):
         feature = {'name': name, 'type': 'sketch'}
     elif op == 'extrude':
         name = _sketch_name_for(node, built)
-        feature = common.extrude(model, name, node['depth'], midplane=node.get('direction') == 'midplane')
+        feature = common.extrude(model, name, node['depth'], midplane=node.get('direction') == 'midplane',
+                                 flip=node.get('flip', False))
         feature = {'name': str(common._call_or_value(feature, 'Name')), 'type': 'extrude'}
     elif op == 'cut':
         name = _sketch_name_for(node, built)
@@ -94,7 +105,17 @@ def execute_node(model, node, built):
         manager = model.SketchManager
         active = manager.ActiveSketch
         sx, sy = _world_to_sketch(active, x, y, z)
-        manager.CreateCircleByRadius(sx * common.MM, sy * common.MM, 0, node['diameter'] / 2.0 * common.MM)
+        try:
+            manager.AddToDB = True
+        except Exception:
+            pass
+        try:
+            manager.CreateCircleByRadius(sx * common.MM, sy * common.MM, 0, node['diameter'] / 2.0 * common.MM)
+        finally:
+            try:
+                manager.AddToDB = False
+            except Exception:
+                pass
         name = common.end_sketch(model)
         if not name:
             raise common.CadError('BUILD_FAILED', '孔草图没有建成功。')
@@ -176,16 +197,19 @@ def main(spec):
         common.verify_identity(model, token)
         common.activate(app, model)
         before = common.feature_count(model)
+        initial = common.feature_list(model)
+        initial_names = [item['name'] for item in initial]
+        known_names = set(initial_names)
         built = []
         created = []
         warnings = []
         try:
             for index, node in enumerate(graph['nodes']):
                 try:
-                    names_before = {item['name'] for item in common.feature_list(model)}
                     feature = execute_node(model, node, built)
                     names_after = [item['name'] for item in common.feature_list(model)]
-                    new_features = [name for name in names_after if name not in names_before]
+                    new_features = [name for name in names_after if name not in known_names]
+                    known_names.update(names_after)
                     created.append({'index': index, 'op': node['op'], 'name': feature['name'],
                                     'features': new_features or [feature['name']]})
                     built.append({
@@ -199,17 +223,34 @@ def main(spec):
                         {'node_index': index, 'node': node.get('id'), 'op': node['op'],
                          'cause': error.envelope().get('error')},
                     )
+                except Exception as error:  # noqa: BLE001 - 非 CadError 也必须回滚
+                    raise common.CadError(
+                        'BUILD_FAILED',
+                        '第 %d 个节点（%s）异常：%s: %s' % (index + 1, node['op'],
+                                                          error.__class__.__name__, error),
+                        {'node_index': index, 'node': node.get('id'), 'op': node['op'],
+                         'exception': error.__class__.__name__},
+                    )
             common.rebuild(model)
         except common.CadError as error:
             rollback_info = {'attempted': False, 'done': False, 'before_count': before}
+            current_names = [item['name'] for item in common.feature_list(model)]
+            leftovers = [name for name in current_names if name not in set(initial_names)]
             if spec.get('rollback_on_fail', True):
                 all_names = [name for item in created for name in item.get('features', [])]
+                for name in leftovers:
+                    if name not in all_names:
+                        all_names.append(name)
                 rollback_info = rollback(model, before, all_names)
             info = error.details if isinstance(error.details, dict) else {}
             info['features_before'] = before
             info['features_after'] = common.feature_count(model)
+            info['leftovers'] = leftovers
             info['rollback'] = rollback_info
             info['created'] = created
+            if rollback_info.get('attempted') and not rollback_info.get('done'):
+                error.code = 'ROLLBACK_FAILED'
+                error.message = error.message + '（回滚未完成，文档可能残留特征）'
             error.details = info
             raise
 

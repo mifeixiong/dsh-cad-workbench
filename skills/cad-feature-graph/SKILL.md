@@ -13,8 +13,8 @@ description: "Feature Graph DSL 参考：节点字段、草图实体、引用规
 | op | 必填 | 可选 | 说明 |
 |---|---|---|---|
 | `sketch` | `entities` | `plane`（默认 front）、`centerline`、`face`、`id` | `plane` 可为 front/top/right、模板里的基准面名、或 `{face:[x,y,z]}` |
-| `extrude` | `depth` | `sketch`（缺省用上一个草图）、`direction: blind\|midplane`、`flip` | 凸台 |
-| `cut` | — | `sketch`、`depth`、`through_all`（默认 false）、`flip`、`both_directions` | 切除 |
+| `extrude` | `depth` | `sketch`（缺省用上一个草图）、`direction: blind\|midplane`、`flip`（反向） | 凸台 |
+| `cut` | 盲切需 `depth` | `sketch`、`through_all`、`flip` | 切除（`both_directions` v0.1 不支持） |
 | `revolve` | 草图含 centerline | `sketch`、`angle`（默认 360）、`type: boss\|cut` | 旋转 |
 | `hole` | `at`、`diameter` | `through_all`（默认 true）、`depth` | 面上打孔（糖：草图+切除） |
 | `fillet` | `radius`、`edges` | — | 恒定半径圆角 |

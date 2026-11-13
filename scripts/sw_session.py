@@ -85,7 +85,7 @@ def action_open(app, spec):
     import win32com.client
     errors = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
     warnings = win32com.client.VARIANT(pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
-    model = common.retry_busy(app.OpenDoc6, path, doc_type, 1, errors, warnings)
+    model = common.retry_busy(app.OpenDoc6, path, doc_type, 1, '', errors, warnings)
     if model is None:
         raise common.CadError('DOC_NOT_FOUND', '打开失败：%s' % path,
                               {'errors': int(errors.value), 'warnings': int(warnings.value)})
@@ -112,12 +112,13 @@ def action_save(app, spec):
             raise common.CadError('CONFIRM_REQUIRED', '目标已存在，拒绝覆盖：%s（确认请传 confirm=true）' % guard)
         saved = common.save(model, guard)
         return {'ok': True, 'doc': common.doc_identity(model), 'saved': saved}
-    return {'ok': True, 'doc': common.doc_identity(model), 'saved': common.save(model)}
+    saved = common.save(model)
+    return {'ok': True, 'doc': common.doc_identity(model), 'saved': saved}
 
 
 def action_close(app, spec):
     model, identity = common.find_document(app, spec.get('doc'))
-    if identity.get('saved') is False and not spec.get('confirm'):
+    if identity.get('saved') is not True and not spec.get('confirm'):
         raise common.CadError(
             'CONFIRM_REQUIRED',
             '文档 %s 有未保存修改；关闭会丢弃。确认请传 confirm=true。' % (identity.get('title') or identity['doc_id']),

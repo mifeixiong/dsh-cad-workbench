@@ -63,6 +63,7 @@ description: "SolidWorks 机械 CAD 总控流程：需求→参数表→批准�
 1. `cadw_session({action:"new_part"})` 或 `open` 用户文件（只读场景用 open）。
 2. `cadw_model({doc, graph, dry_run:true})` 先校验图，检查计划文本。
 3. `cadw_model({doc, graph, expect:{bbox_mm}})` 正式建模。
+   **整张图一次提交**（不要把 sketch/extrude/hole 拆成多次 cadw_model：每次多 1.5–2 s 进程+附着+重建）。
    - 失败会自动回滚；看 `rollback.done` 与 `error.details.created`。
    - `verification.status` 必须是 `verified`；`mismatch` 就改图重来，不要嘴硬。
 4. 需要"看得见"时传 `visual:true`（慢，每步置前）。
@@ -102,7 +103,7 @@ description: "SolidWorks 机械 CAD 总控流程：需求→参数表→批准�
 | `COM_UNAVAILABLE` | 先手动启动 SolidWorks 到主界面，再 `cadw_doctor` |
 | `DOC_BUSY` | 等另一个会话结束；不要同时开两个建模会话 |
 | `BUILD_FAILED` | 看 `details.cause`；先 `dry_run` 查图，再检查边/面选点是否在实体上 |
-| `PLAN_MISMATCH` | 实测与批准方案不符：改图或向用户报告偏差，不得改 expect 蒙混 |
+| `PLAN_MISMATCH` | 工具返回 ok:false：实测与批准方案不符；改图或报告偏差，不得改 expect 蒙混 |
 | `UNSUPPORTED` | 如实说明能力边界（如装配配合、FreeCAD 后端 v0.1 不支持） |
 
 ## 9. 必须遵守

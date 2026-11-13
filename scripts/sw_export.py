@@ -12,15 +12,15 @@ def main(spec):
     workspace = common.workspace_of(spec)
     out_dir = os.path.abspath(spec.get('out_dir') or os.path.join(workspace, 'cad-output'))
     common.ensure_dir(out_dir)
-    formats = [str(item).lower() for item in (spec.get('formats') or ['step'])]
+    formats = list(dict.fromkeys(str(item).lower() for item in (spec.get('formats') or ['step'])))
     overwrite = bool(spec.get('overwrite'))
     with common.sw_lock('sw_export', workspace=workspace):
         app = common.attach(launch=False)
         model, identity = common.find_document(app, spec.get('doc'))
         common.verify_identity(model, identity['doc_id'])
         common.activate(app, model)
-        basename = spec.get('basename') or os.path.splitext(identity.get('title') or 'model')[0]
-        basename = str(basename)
+        basename = common.safe_basename(
+            spec.get('basename') or os.path.splitext(identity.get('title') or 'model')[0], 'model')
         artifacts = []
         failures = []
         for fmt in formats:

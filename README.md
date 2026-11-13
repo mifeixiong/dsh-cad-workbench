@@ -24,11 +24,11 @@
 | `cadw_doctor` | 环境自检：Python 依赖、SolidWorks 版本/模板、FreeCAD 探测、能力矩阵、锁状态、修复建议 |
 | `cadw_session` | 文档会话：status/new_part/new_assembly/open/activate/save/save_as/close/close_all/list；返回 `doc_id` 令牌 |
 | `cadw_model` | 按 Feature Graph 建模：sketch/extrude/cut/revolve/hole/fillet/chamfer；dry_run、逐节点检查、Undo 回滚、expect 实测比对 |
-| `cadw_measure` | 包围盒/体积（来源标注）/实面边数/特征树/草图审计/基准面世界轴 |
+| `cadw_measure` | 包围盒/体积（来源标注）/实面边数/特征树/草图段数与约束状态/基准面轴向（查不到时退回经验表并标注） |
 | `cadw_capture` | 4 视图 + 2×2 拼图；像素统计自动标记空白/全黑；图片内联回传 |
 | `cadw_export` | step/iges/stl/3mf/pdf/png；逐格式复核 bytes+sha256 |
 | `cadw_drawing` | 零件/装配体出工程图：第一角法 4 视图、模型尺寸、pdf/dxf/dwg |
-| `cadw_review` | 只读审查 DXF（7 项）/STL（三角数/退化/水密）/STEP（schema/单位/启发式包围盒） |
+| `cadw_review` | 只读审查 DXF（11 项检查）/STL（三角数/退化/水密）/STEP（schema/单位/启发式包围盒） |
 | `cadw_job` | 作业台账：start/record/verify/finish/get/list；交付结论 delivered/partial/failed + 信任等级 |
 
 随包 4 个技能：`cad-modeling-workflow`（总控流程与硬关卡）、`solidworks-com`（API 事实与坑）、
@@ -86,9 +86,9 @@ cadw_doctor
 ## 安全边界
 
 - **文档身份令牌**：所有写操作必须带 `doc_id`；写入前复核路径/标题，防止特征落到用户另一个文档。
-- **跨进程锁**：多个会话/子代理串行使用 SolidWorks；锁超时给 `DOC_BUSY`，不并发写。
-- **精确回滚**：记录本次新增特征名，失败时逆序 `DeleteSelection2` 删除并复验特征数；
-  不碰用户原有特征（`EditUndo2` 只作退路）。
+- **跨进程锁**：OS 级文件锁串行化 SolidWorks（Windows `msvcrt.locking` / POSIX `flock`）；进程崩溃由内核释放，锁超时给 `DOC_BUSY`。
+- **精确回滚**：构建前记录特征快照，失败时删除本次新增（含失败节点的残留草图）并复验特征数；
+  不碰用户原有特征，回滚不完成返回 `ROLLBACK_FAILED`。
 - **危险动作确认**：覆盖已有 `.sldprt/.sldasm/.slddrw`、`close_all`、丢弃未保存修改需要 `confirm:true`。
 - **路径守卫**：默认只写 会话工作区；拒绝系统目录与 SolidWorks 安装目录。
 - **无网络、无遥测**；不执行用户代码（Feature Graph 是数据，不是脚本）。
@@ -104,7 +104,8 @@ cadw_doctor
 - 失败图精确回滚（特征数 23 → 23，删除 凸台-拉伸2/草图3）；
 - 过期令牌 `DOC_NOT_FOUND`；锁竞争 `DOC_BUSY`（等待 2.1 s）。
 
-离线测试：`python test/run_all.py` → 3 项全绿（JS 10 例、图校验 29 例、文件审查用例）。
+离线测试：`python test/run_all.py` → 4 项全绿（JS 10 例、common 14 例、图校验 33 例、文件审查含 MTEXT）。
+实机回归：`python test/live_regressions.py` → 10/10（Top 面孔位、倒角角度、闭合 polyline、回滚、open/save）。
 
 ## 能力边界（v0.1）
 
@@ -112,7 +113,8 @@ cadw_doctor
 
 **不支持**（会明确报错，不静默降级）：装配体配合与干涉检查、FreeCAD/CadQuery 后端、`shell`/
 `linear_pattern`/`circular_pattern`、`slot`/`rounded_rect`、偏移基准面、扫掠/放样、
-Web UI 3D 查看器、CAD 模式预设。见 [docs/design.md](docs/design.md#roadmap)。
+`cut.both_directions`（请用两次 cut）、Web UI 3D 查看器、CAD 模式预设。
+`cut` 盲切必须显式给 `depth`；`extrude.flip` 已支持。见 [docs/design.md](docs/design.md#roadmap)。
 
 ## 环境要求
 

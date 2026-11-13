@@ -226,24 +226,31 @@ def main():
 
     print('== 11. 锁 ==')
     pid = sw_pid()
-    lock_path = os.path.join(os.path.expandvars('%LOCALAPPDATA%'), 'dsh-cad-workbench', 'sw.lock')
     if pid:
-        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-        with open(lock_path, 'w', encoding='utf-8') as handle:
-            json.dump({'pid': pid, 'tool': 'live-smoke-lock', 'token': 't',
-                       'timestamp': time.time()}, handle)
+        state = os.path.join(os.path.expandvars('%LOCALAPPDATA%'), 'dsh-cad-workbench')
+        os.makedirs(state, exist_ok=True)
+        holder_code = (
+            "import sys, time\n"
+            "sys.path.insert(0, %r)\n"
+            "import sw_common\n"
+            "lock = sw_common.sw_lock('live-smoke-lock')\n"
+            "lock.__enter__()\n"
+            "time.sleep(4)\n"
+            "lock.__exit__(None, None, None)\n"
+        ) % os.path.join(ROOT, 'scripts')
+        holder = subprocess.Popen([PY, '-c', holder_code],
+                                  env=dict(os.environ, CADW_STATE_DIR=state, CADW_LOCK_TIMEOUT_MS='10000'),
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1.0)
         os.environ['CADW_LOCK_TIMEOUT_MS'] = '2000'
         started = time.time()
         busy = run_script('sw_measure.py', {'workspace': WORK, 'doc': token, 'scope': 'summary'}, timeout=120)
         elapsed = time.time() - started
-        try:
-            os.remove(lock_path)
-        except Exception:
-            pass
         os.environ.pop('CADW_LOCK_TIMEOUT_MS', None)
+        holder.wait(timeout=10)
         check('lock.busy', busy.get('ok') is False and busy.get('error', {}).get('code') == 'DOC_BUSY',
               str(busy.get('error', {}).get('code')))
-        check('lock.waited', elapsed >= 1.5, '等待 %.1fs' % elapsed)
+        check('lock.waited', elapsed >= 1.8, '等待 %.1fs' % elapsed)
     else:
         print('  跳过锁测试：找不到 SLDWORKS.exe 进程')
 
