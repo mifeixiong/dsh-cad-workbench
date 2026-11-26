@@ -13,7 +13,7 @@ and records the evidence in a job ledger.
 | Tool | Purpose |
 |---|---|
 | `cadw_doctor` | Environment and capability probe (Python, SolidWorks, templates, FreeCAD, lock) |
-| `cadw_session` | Document session with `doc_id` identity tokens |
+| `cadw_session` | Document session and open-window manager: list/status (visible windows by default, `include_hidden` for referenced docs), new/open/save/activate, batch close, close_others, close_all; `doc_id` identity tokens |
 | `cadw_model` | Feature-graph modelling: sketch/extrude/cut/revolve/hole/fillet/chamfer; dry-run, rollback, `expect` verification |
 | `cadw_measure` | Exact geometry facts, sketch audit, plane transforms |
 | `cadw_capture` | Four views + 2×2 contact sheet, blank-frame detection, inline images |
@@ -40,7 +40,12 @@ Then restart DSH and run `cadw_doctor` in a new session.
 - Document identity tokens; writes verify path/title first.
 - Cross-process SolidWorks lock (`DOC_BUSY` instead of interleaved writes).
 - Precise rollback by deleting only the features this job created.
-- `confirm:true` required to overwrite documents, discard unsaved changes, or close all.
+- `confirm:true` required to overwrite documents, discard unsaved changes, or bulk-close windows.
+- Window management only touches visible `Frame.ModelWindows` by default; hidden/referenced documents need
+  `include_hidden:true`. Dirty documents are refused unless `confirm` (discard via `QuitDoc`) or
+  `save_unsaved` (save first). Close results are verified against `GetDocuments`, never assumed.
+- `status`/`list` attach without launching SOLIDWORKS: if `GetActiveObject` fails with `MK_E_UNAVAILABLE`,
+  a running `SLDWORKS.exe` process is required before falling back to `Dispatch`.
 - Workspace-confined paths; no network, no telemetry, no user-code execution.
 
 ## Status
@@ -53,12 +58,16 @@ v0.1.1 audit regressions: **10/10** — top-face hole placement, chamfer 125 mm�
 polyline, partial-feature rollback, open/save. Cross-process lock is now an OS file lock;
 exports no longer accept a stale pre-existing file as success.
 
-Offline: `python test/run_all.py` — JS contract tests plus Python graph/review cases.
+Open-window live checks: `python test/live_windows.py` — **18/18** (inventory, dirty refusal/discard,
+CloseDoc vs QuitDoc, batch close, cleanup).
 
-## Limits (v0.2)
+Offline: `python test/run_all.py` — 5 suites (JS contracts, common, session windows, graph, review).
+
+## Limits (v0.3.0)
 
 No interference checking/motion, no FreeCAD/CadQuery backend, no shell/slot/rounded-rect,
-no swept cut/loft, no web viewer, no CAD-mode preset. Unsupported requests fail loudly.
+no swept cut/loft, no web viewer, no CAD-mode preset, no window tiling/cascading or cross-instance
+window management. Unsupported requests fail loudly.
 
 ## License
 

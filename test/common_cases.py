@@ -18,6 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.join(os.path.dirname(HERE), 'scripts')
 sys.path.insert(0, SCRIPTS)
 
+import cad_doctor  # noqa: E402
 import graph  # noqa: E402
 import sw_build  # noqa: E402
 import sw_common  # noqa: E402
@@ -137,6 +138,33 @@ def test_lock():
     check('lock.no_overlap', not overlap, intervals)
 
 
+def test_doctor_without_solidworks():
+    """SolidWorks 未运行/附着失败时 doctor 仍要返回能力矩阵，不能崩在 templates=None。"""
+    original = (cad_doctor._module_info, cad_doctor._com_registered,
+                cad_doctor.common.attach, cad_doctor.common.find_template)
+    cad_doctor._module_info = lambda: ({'win32com': True}, {})
+    cad_doctor._com_registered = lambda: True
+
+    def fail_attach(launch=False):
+        raise sw_common.CadError('COM_UNAVAILABLE', 'SolidWorks 未运行')
+
+    cad_doctor.common.attach = fail_attach
+    cad_doctor.common.find_template = lambda app, kind, prefer=None: {'path': None, 'source': 'missing'}
+    try:
+        result = cad_doctor.main({'workspace': tempfile.mkdtemp(prefix='cadw-doctor-'), 'probe_com': True})
+        crashed = None
+    except Exception as error:  # noqa: BLE001
+        result = {'ok': False, 'error': str(error)}
+        crashed = error
+    finally:
+        (cad_doctor._module_info, cad_doctor._com_registered,
+         cad_doctor.common.attach, cad_doctor.common.find_template) = original
+    check('doctor.no_sw_no_crash', crashed is None and result.get('ok') is True,
+          result.get('error') or result.get('summary'))
+    check('doctor.no_sw_capability', result.get('capabilities', {}).get('com') is False,
+          result.get('capabilities'))
+
+
 def test_graph_entry():
     check('graph.validate_exists', callable(getattr(graph, 'validate', None)))
     check('graph.supported_ops', 'extrude' in graph.SUPPORTED_OPS)
@@ -147,6 +175,7 @@ def main():
     test_export_guard()
     test_json_safe()
     test_lock()
+    test_doctor_without_solidworks()
     test_graph_entry()
     print('\ncommon_cases: 失败 %d' % len(FAILURES))
     return 1 if FAILURES else 0

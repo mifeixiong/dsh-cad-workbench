@@ -68,6 +68,7 @@ def make_dirty_part(label):
                                     {'op': 'extrude', 'depth': 5},
                                 ]}})
     if not built.get('ok'):
+        session(action='close', doc=token, confirm=True)
         return None, built
     return token, built
 

@@ -28,6 +28,7 @@ const { contentFrom } = await import(new URL('lib/images.js', root))
 const EXPECTED_TOOLS = [
   'cadw_doctor', 'cadw_session', 'cadw_model', 'cadw_measure', 'cadw_capture',
   'cadw_export', 'cadw_drawing', 'cadw_review', 'cadw_assembly', 'cadw_job',
+  'cadw_ref', 'cadw_grid', 'cadw_diff', 'cadw_audit', 'cadw_dispatch',
 ]
 
 function mockContext() {
@@ -56,7 +57,7 @@ async function withWorkspace() {
   return mkdtemp(join(tmpdir(), 'cadw-test-'))
 }
 
-test('registers nine cadw_* tools with parameters and output schema', () => {
+test('registers every cadw_* tool with parameters and output schema', () => {
   const { ctx, definitions } = mockContext()
   apply(ctx)
   assert.deepEqual([...definitions.keys()].sort(), [...EXPECTED_TOOLS].sort())
@@ -83,6 +84,27 @@ test('cadw_session exposes open-window management actions and parameters', () =>
   assert.match(session.parameters.action.description, /close_all/)
 })
 
+test('reference-image tools expose calibration, grid and diff surfaces', () => {
+  const { ctx, definitions } = mockContext()
+  apply(ctx)
+  const ref = definitions.get('cadw_ref')
+  assert.match(ref.parameters.action.description, /calibrate/)
+  assert.match(ref.parameters.action.description, /measure/)
+  for (const key of ['frame', 'masks', 'grid', 'measures', 'frame_id']) {
+    assert.ok(ref.parameters[key], 'cadw_ref 缺参数 ' + key)
+  }
+  const grid = definitions.get('cadw_grid')
+  for (const key of ['parts', 'report', 'stl', 'mesh', 'views', 'zones']) {
+    assert.ok(grid.parameters[key], 'cadw_grid 缺参数 ' + key)
+  }
+  assert.match(grid.description, /格号/)
+  const diff = definitions.get('cadw_diff')
+  for (const key of ['parts', 'report', 'targets', 'profile_measures', 'tolerance']) {
+    assert.ok(diff.parameters[key], 'cadw_diff 缺参数 ' + key)
+  }
+  assert.match(diff.description, /PASS|WARN|FAIL/)
+})
+
 test('registers bundled skills through the skills provider', async () => {
   const { ctx, provider } = mockContext()
   apply(ctx)
@@ -90,7 +112,8 @@ test('registers bundled skills through the skills provider', async () => {
   assert.ok(skills, '没有注册技能 provider')
   const list = await skills.list()
   assert.deepEqual(list.map((item) => item.name).sort(), [
-    'cad-drawing-gb', 'cad-feature-graph', 'cad-modeling-workflow', 'solidworks-com',
+    'cad-adversarial-review', 'cad-drawing-gb', 'cad-feature-graph',
+    'cad-modeling-workflow', 'cad-reference-match', 'solidworks-com',
   ])
   for (const item of list) {
     const resolved = await skills.get({ name: item.name, provider: item.provider })

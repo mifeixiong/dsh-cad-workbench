@@ -123,15 +123,19 @@ def main(spec):
     templates = result['solidworks'].get('templates') or {}
     capabilities = {
         'com': bool(result['solidworks'].get('registered') and result['solidworks'].get('running')),
-        'model': bool(modules.get('win32com') and templates.get('part', {}).get('path')),
-        'assembly': bool(modules.get('win32com') and templates.get('assembly', {}).get('path')),
-        'drawing': bool(modules.get('win32com') and templates.get('drawing', {}).get('path')),
+        'model': bool(modules.get('win32com') and (templates.get('part') or {}).get('path')),
+        'assembly': bool(modules.get('win32com') and (templates.get('assembly') or {}).get('path')),
+        'drawing': bool(modules.get('win32com') and (templates.get('drawing') or {}).get('path')),
         'capture': bool(modules.get('win32com') and modules.get('PIL')),
         'step': bool(modules.get('win32com')),
         'dxf_review': bool(modules.get('ezdxf')),
         'stl_review': True,
         'step_review': True,
         'massprops': bool(modules.get('win32com')),
+        # 参考图对位（v0.4）：标定/量测/叠图/差分只要 numpy + Pillow，不需要 SolidWorks
+        'refkit': bool(modules.get('numpy') and modules.get('PIL')),
+        # 对抗审查是纯标准库 JSON 计算
+        'audit': True,
     }
     result['capabilities'] = capabilities
 
@@ -140,15 +144,17 @@ def main(spec):
         result['suggestions'].append('安装 pywin32：pip install pywin32（COM 建模/截图/出图需要）')
     if not modules.get('PIL'):
         result['suggestions'].append('安装 Pillow：pip install Pillow（截图 PNG 与拼图需要）')
+    if not modules.get('numpy'):
+        result['suggestions'].append('安装 numpy：pip install numpy（参考图量测、网格叠图、轮廓差分需要）')
     if not modules.get('ezdxf'):
         result['suggestions'].append('安装 ezdxf：pip install ezdxf（DXF 图纸审查需要；不影响建模）')
-    if not templates.get('part', {}).get('path'):
+    if not (templates.get('part') or {}).get('path'):
         result['suggestions'].append('找不到零件模板：先手动启动一次 SolidWorks 并确认默认模板，或设置 CADW_PART_TEMPLATE')
     if not result['solidworks'].get('running'):
         result['suggestions'].append('SolidWorks 未运行：启动到主界面后再建模（cadw_session 会尝试拉起）')
     if result['lock'].get('held') and not result['lock'].get('stale'):
         result['suggestions'].append('检测到 SolidWorks 锁被占用；等另一个会话结束，或确认卡死后删除 %s' % os.path.join(common.state_dir(), 'sw.lock'))
-    if not templates.get('drawing', {}).get('path'):
+    if not (templates.get('drawing') or {}).get('path'):
         result['suggestions'].append('找不到工程图模板：cadw_drawing 会报 UNSUPPORTED；可在 SolidWorks 里新建一次工程图生成默认模板')
     if missing:
         result['suggestions'].append('缺少模块：' + ', '.join(missing))
@@ -157,6 +163,8 @@ def main(spec):
         result['solidworks'].get('revision') or '未连接',
         ', '.join(name for name, ok in capabilities.items() if ok) or '无',
     )
+    if not capabilities['refkit']:
+        result['summary'] += '（参考图对位不可用：缺 numpy/Pillow）'
     return result
 
 

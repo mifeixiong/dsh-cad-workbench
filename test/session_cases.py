@@ -155,21 +155,26 @@ def test_inventory():
     app = FakeApp([assembly, part, hidden], active=part)
     payload = sw_session.action_list(app)
     entries = payload['documents']
-    check('inventory.count', len(entries) == 3, len(entries))
+    check('inventory.count', len(entries) == 2, len(entries))
     check('inventory.window_count', payload['window_count'] == 2, payload['window_count'])
     check('inventory.document_count', payload['document_count'] == 3, payload['document_count'])
+    check('inventory.hidden_count', payload['hidden_count'] == 1, payload['hidden_count'])
     check('inventory.dirty_count', payload['dirty_count'] == 1, payload['dirty_count'])
     check('inventory.active', payload['active_doc_id'] == sw_common.doc_identity(part)['doc_id'],
           payload.get('active_doc_id'))
-    windows = [item for item in entries if item.get('window')]
-    check('inventory.window_order', [item['title'] for item in windows] == ['装配体1.SLDASM', '侧板.SLDPRT'],
-          [item['title'] for item in windows])
-    check('inventory.window_index', windows[0]['index'] == 1 and windows[1]['index'] == 2,
-          [item.get('index') for item in windows])
-    hidden_entry = next(item for item in entries if item['title'] == '参考轮.SLDPRT')
+    check('inventory.hidden_not_listed', all(item.get('window') for item in entries) and
+          all(item['title'] != '参考轮.SLDPRT' for item in entries), [item['title'] for item in entries])
+    check('inventory.window_order', [item['title'] for item in entries] == ['装配体1.SLDASM', '侧板.SLDPRT'],
+          [item['title'] for item in entries])
+    check('inventory.window_index', entries[0]['index'] == 1 and entries[1]['index'] == 2,
+          [item.get('index') for item in entries])
+    full = sw_session.action_list(app, {'include_hidden': True})
+    full_entries = full['documents']
+    check('inventory.full_count', len(full_entries) == 3, len(full_entries))
+    hidden_entry = next(item for item in full_entries if item['title'] == '参考轮.SLDPRT')
     check('inventory.hidden', hidden_entry['window'] is False and hidden_entry['index'] is None, hidden_entry)
-    check('inventory.summary', isinstance(payload.get('summary'), str) and '未保存' in payload['summary'],
-          payload.get('summary'))
+    check('inventory.summary', isinstance(payload.get('summary'), str) and '未保存' in payload['summary'] and
+          'include_hidden' in payload['summary'], payload.get('summary'))
 
 
 def test_close_requires_confirm():

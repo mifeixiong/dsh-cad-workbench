@@ -24,13 +24,23 @@
 - 只删本次新增，不碰用户原有特征；删除失败才退到 `EditUndo2`，且有界。
 - 回滚失败返回 `ROLLBACK_FAILED` 并保留现场，不静默关闭文档。
 
+## 文档窗口
+
+- 默认只操作 `IFrame.ModelWindows` 里的可见窗口；`GetDocuments` 里那些被装配/工程图引用但不可见的文档标
+  `window:false`，默认跳过，避免关掉后装配体丢引用。
+- 关闭前读 `GetSaveFlag`：干净文档走 `CloseDoc`，脏文档默认拒绝；确认丢弃才走 `QuitDoc`（明确不保存、不弹保存框）。
+- 批量关闭先做 dry-run 预览；关闭后重新枚举 `GetDocuments` 复核，没关掉就报 `CLOSE_FAILED`。
+- `GetActiveObject` 在部分 SW2024 上会返回 `MK_E_UNAVAILABLE`（ROT 没注册）；插件先枚举 `SLDWORKS.exe` 进程，
+  确认已运行才用 `Dispatch` 回退，绝不因为 list/status 把 SolidWorks 拉起来。
+
 ## 危险动作
 
 需要 `confirm:true`：
 
 - `save_as` 覆盖已存在的 `.sldprt/.sldasm/.slddrw`；
-- `close` 一个有未保存修改的文档；
-- `close_all`；
+- `close` 一个有未保存修改的文档（或 `save_unsaved:true` 先保存）；
+- `close_others` / `close_all`；
+- 关闭 `window:false` 的隐藏/参考文档（`include_hidden:true`）；
 - `cadw_export` / `cadw_drawing` 覆盖已存在产物。
 
 ## 路径
@@ -39,6 +49,16 @@
 - 拒绝 `C:\\Windows`、`C:\\Program Files*`、`C:\\ProgramData`。
 - 导出/保存先写到目标目录（不存在则创建），写完检查存在与非空。
 - 读操作（`cadw_review`）可读工作区外文件。
+
+参考图对位与派工（v0.4）的边界：
+
+| 工具 | 读 | 写 | 说明 |
+|---|---|---|---|
+| `cadw_ref` | 参考图（可在工作区外，只读） | `.cad-workbench/refkit/<project>.json` | 工程文件只存标定/掩膜/量测结果，不复制图片 |
+| `cadw_grid` | STL/网格/报告、工程里的参考帧 | `cad-out/refkit/<project>/*.png|json` | 输出受 `guardOutputPath` 约束 |
+| `cadw_diff` | 报告、网格、工程 | 同上（md 报告） | 纯计算 + 写 md |
+| `cadw_audit` | 报告/facts/diff、STL | `cad-out/audit/*.md` | 不碰 SolidWorks、不执行用户代码 |
+| `cadw_dispatch` | 只吃入参 | `.cad-workbench/dispatch/<batch>/*.md` | **不替你调用 subagent**；工单里的写作用域是给子智能体的约束，不是权限提升 |
 
 ## 数据
 

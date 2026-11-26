@@ -519,15 +519,18 @@ def attach(launch=False):
             try:
                 pid = int(app.GetProcessID)
                 if pid not in pids:
-                    try:
-                        app.ExitApp()
-                    except Exception:
-                        pass
-                    raise CadError(
-                        'COM_UNAVAILABLE',
-                        'COM 附着到了新启动的 SolidWorks 实例（pid=%s），已退出；请先打开目标 SolidWorks。' % pid,
-                        {'processes': pids, 'attached_pid': pid},
-                    )
+                    # 进程可能在枚举与 Dispatch 之间重启过；再枚举一次，避免误杀刚启动的合法实例。
+                    pids_now = solidworks_pids()
+                    if pid not in pids_now:
+                        try:
+                            app.ExitApp()
+                        except Exception:
+                            pass
+                        raise CadError(
+                            'COM_UNAVAILABLE',
+                            'COM 附着到了新启动的 SolidWorks 实例（pid=%s），已退出；请先打开目标 SolidWorks。' % pid,
+                            {'processes': pids, 'processes_now': pids_now, 'attached_pid': pid},
+                        )
             except CadError:
                 raise
             except Exception:

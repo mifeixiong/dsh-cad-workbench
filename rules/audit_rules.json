@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "tolerances": {
+    "gap_tol": 0.1,
+    "buried_tol": 0.15,
+    "clash_vol": 0.5,
+    "dup_iou": 0.9,
+    "profile_tol": 1,
+    "fill_min": 0.02,
+    "bbox_slack": 0.05,
+    "buried_cover": 0.8,
+    "buried_ratio": 10,
+    "fill_max": 0.999,
+    "clash_frac": 0.35,
+    "clash_contain": 0.95
+  },
+  "support_planes": [
+    0,
+    9.3,
+    13.75,
+    19.15,
+    22.95
+  ],
+  "cantilever": [
+    "mast",
+    "antenna",
+    "crane",
+    "boom",
+    "jib",
+    "propeller",
+    "prop",
+    "davit",
+    "rail",
+    "ladder",
+    "lattice",
+    "flag",
+    "sheave",
+    "hook",
+    "cable",
+    "strut",
+    "fin",
+    "bulb",
+    "bracket",
+    "brace",
+    "cross",
+    "light",
+    "horn",
+    "camera",
+    "vent",
+    "pipe",
+    "fitting",
+    "handrail",
+    "steps",
+    "cleat",
+    "socket",
+    "anchor"
+  ],
+  "buried_allow": [
+    "strut",
+    "pod",
+    "keel",
+    "bilge"
+  ],
+  "clash_allow": [
+    [
+      "strut",
+      "hull"
+    ],
+    [
+      "pod",
+      "hull"
+    ],
+    [
+      "fin",
+      "hull"
+    ]
+  ],
+  "angles": {
+    "datum": true,
+    "float": true,
+    "buried": true,
+    "clash": true,
+    "dup": true,
+    "sketch": true,
+    "shape": true,
+    "mass": true,
+    "naming": true
+  },
+  "buried_host_allow": [
+    "hangar",
+    "container",
+    "shelter",
+    "tank",
+    "house",
+    "cabin",
+    "deckhouse",
+    "hold",
+    "casing",
+    "duct",
+    "trunk"
+  ],
+  "mirror_keywords": [
+    "port",
+    "starboard",
+    "stb",
+    " ps",
+    " sb"
+  ],
+  "surface_parts": [
+    "glazing",
+    "window",
+    "porthole",
+    "port",
+    "rail",
+    "railing",
+    "louver",
+    "panel",
+    "plate",
+    "door",
+    "hatch",
+    "grille",
+    "strip",
+    "band",
+    "plate name",
+    "sidelight",
+    "cap",
+    "rib",
+    "stiffener",
+    "flange",
+    "bracket",
+    "mount"
+  ]
+}
