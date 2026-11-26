@@ -23,6 +23,8 @@ import os
 import re
 import struct
 import sys
+import time
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -836,7 +838,9 @@ def main(spec):
         else:
             out_dir = os.path.join(workspace, 'cad-output', 'audit')
         common.ensure_dir(out_dir)
-        stamp = common.now_iso().replace(':', '').replace('-', '').replace('+', '_')[:17]
+        # 秒级时间戳同秒覆盖：与 diff 报告同一类问题（CI 复核发现），
+        # 改成时间 + 短随机后缀，同秒多次审查不会互相覆盖。
+        stamp = time.strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:6]
         report_path = os.path.join(out_dir, 'audit-%s.md' % stamp)
         try:
             with open(report_path, 'w', encoding='utf-8') as handle:

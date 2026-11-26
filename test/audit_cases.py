@@ -318,6 +318,18 @@ def case_stl_crosscheck_facts_only():
 
 
 @case
+def case_report_name_unique():
+    # 同一秒内两次审查不能覆盖同一份报告（CI 上 diff 就栽在这）
+    first = audit(parts=CLEAN_PARTS, facts=CLEAN_FACTS, support_planes=[0.0],
+                  rules={'cantilever': ['plate']}, write_report=True,
+                  out_dir=os.path.join(WORK, 'audit_unique'))
+    second = audit(parts=CLEAN_PARTS, facts=CLEAN_FACTS, support_planes=[0.0],
+                   rules={'cantilever': ['plate']}, write_report=True,
+                   out_dir=os.path.join(WORK, 'audit_unique'))
+    assert first['report_path'] != second['report_path'], (first['report_path'], second['report_path'])
+
+
+@case
 def case_stl_crosscheck():
     import struct
     path = os.path.join(WORK, 'block.stl')

@@ -489,12 +489,15 @@ import cad_refkit  # noqa: E402  (供 case_cells_full_range 直接用)
 
 @case
 def case_diff_report_name_unique(work):
-    first = run('diff', work, project='demo', parts=PARTS,
-                targets=[{'name': 'x', 'part': 'hull', 'field': 'dx', 'ref': [35, 37]}])
-    second = run('diff', work, project='demo', parts=PARTS,
-                 targets=[{'name': 'x', 'part': 'hull', 'field': 'dx', 'ref': [35, 37]}])
-    assert first['report_path'] != second['report_path'], (first['report_path'], second['report_path'])
-    assert first['report_path'].endswith('.md'), first['report_path']
+    # 紧循环里连跑 20 次：毫秒级时间戳在快机器/CI 上仍会撞（真实 CI 失败就是这条）
+    paths = set()
+    for _index in range(20):
+        result = run('diff', work, project='demo', parts=PARTS,
+                     targets=[{'name': 'x', 'part': 'hull', 'field': 'dx', 'ref': [35, 37]}])
+        path = result['report_path']
+        assert path.endswith('.md'), path
+        assert path not in paths, ('报告名重复：', path)
+        paths.add(path)
 
 
 def main():
