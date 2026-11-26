@@ -1,7 +1,7 @@
 {
   "name": "dsh-cad-workbench",
-  "version": "0.3.0",
-  "description": "机械 CAD 工作台：SolidWorks 声明式建模、实测校核、视图自检、工程图与 DXF/STEP/STL 审查（DeepSeek Harness 插件）。",
+  "version": "0.4.0",
+  "description": "机械 CAD 工作台：SolidWorks 声明式建模、实测校核、参考图对位（标定/网格/差分）、对抗审查、分区派工、工程图与 DXF/STEP/STL 审查（DeepSeek Harness 插件）。",
   "type": "module",
   "main": "index.js",
   "icon": "./icon.svg",
@@ -34,7 +34,12 @@
     "feature-graph",
     "dxf",
     "step",
-    "engineering"
+    "engineering",
+    "reference-image",
+    "calibration",
+    "reverse-engineering",
+    "audit",
+    "subagent-dispatch"
   ],
   "repository": {
     "type": "git",
@@ -68,6 +73,9 @@
     "test:live": "python test/live_smoke.py",
     "verify:installed": "node test/verify_installed.mjs",
     "test:live:advanced": "python test/live_advanced.py",
-    "test:live:windows": "python test/live_windows.py"
+    "test:live:windows": "python test/live_windows.py",
+    "test:refkit": "python test/refkit_cases.py",
+    "test:audit": "python test/audit_cases.py",
+    "test:dispatch": "node --test test/dispatch_cases.mjs"
   }
 }

@@ -50,6 +50,16 @@
 - 导出/保存先写到目标目录（不存在则创建），写完检查存在与非空。
 - 读操作（`cadw_review`）可读工作区外文件。
 
+参考图对位与派工（v0.4）的边界：
+
+| 工具 | 读 | 写 | 说明 |
+|---|---|---|---|
+| `cadw_ref` | 参考图（可在工作区外，只读） | `.cad-workbench/refkit/<project>.json` | 工程文件只存标定/掩膜/量测结果，不复制图片 |
+| `cadw_grid` | STL/网格/报告、工程里的参考帧 | `cad-out/refkit/<project>/*.png|json` | 输出受 `guardOutputPath` 约束 |
+| `cadw_diff` | 报告、网格、工程 | 同上（md 报告） | 纯计算 + 写 md |
+| `cadw_audit` | 报告/facts/diff、STL | `cad-out/audit/*.md` | 不碰 SolidWorks、不执行用户代码 |
+| `cadw_dispatch` | 只吃入参 | `.cad-workbench/dispatch/<batch>/*.md` | **不替你调用 subagent**；工单里的写作用域是给子智能体的约束，不是权限提升 |
+
 ## 数据
 
 - 无网络请求、无遥测、无上传。

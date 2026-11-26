@@ -21,6 +21,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { buildWorkOrders } from './lib/dispatch.js'
 import { contentFrom, saveImageRef } from './lib/images.js'
 import { normalizeGraph, graphHash } from './lib/graph.js'
 import {
@@ -55,6 +56,8 @@ const SKILL_NAMES = [
   'solidworks-com',
   'cad-feature-graph',
   'cad-drawing-gb',
+  'cad-reference-match',
+  'cad-adversarial-review',
 ]
 
 let rawDefineTool = (options) => options
@@ -652,7 +655,290 @@ function registerTools(ctx) {
     },
   }))
 
-  // 10) 作业台账
+  // 11) 参考图工程：标定与量测
+  ctx.tools.register(defineTool({
+    name: 'cadw_ref',
+    description:
+      '参考图对位工程的标定与量测：action=calibrate 用两对 (像素, 米) 建立 u/v 双轴线性标定并登记掩膜与网格；' +
+      'action=measure 按颜色/深色/墨迹掩膜做 profile（轮廓）、bbox（区域包围盒）、extent（扫描线）、coverage（连续性）四种量测，' +
+      '可顺手把结果固化成 target 目标带；action=list/get 查看工程。' +
+      '工程存在 <workspace>/.cad-workbench/refkit/<project>.json；掩膜的区域过滤用米而不是像素，换帧不用重调。',
+    parameters: {
+      action: { type: 'string', required: true, description: 'calibrate | measure | list | get' },
+      project: { type: 'string', description: '工程 id（如 jidi）；calibrate 时自动建立' },
+      frame: {
+        type: 'json',
+        description: 'calibrate：{id, path, view, u:{px0,m0,px1,m1}, v:{px0,m0,px1,m1}}；v 的斜率通常为负（图像行向下、模型 z 向上）',
+      },
+      masks: { type: 'json', description: 'calibrate：{名字: 规则}；规则 type=color/dark/ink，可带 u/v 米制范围与 exclude_px' },
+      grid: { type: 'json', description: '网格：{u_step, v_step, u_origin, v_origin}，缺省 5/5' },
+      frame_id: { type: 'string', description: 'measure：用哪一帧（calibrate 里的 frame.id）' },
+      measures: { type: 'json', description: 'measure：[{id, kind, mask, ...}]；item.target 可写 {name, part, field, tol} 固化成目标带' },
+      workspace: { type: 'string', description: '工作区根目录；缺省用会话当前目录' },
+    },
+    timeoutMs: 300000,
+    output: { schema: OUTPUT_SCHEMA, render: renderResult },
+    async execute(args, exec) {
+      const workspace = workspaceOf(args, exec, ctx)
+      const action = String(args.action ?? '')
+      if (!['calibrate', 'measure', 'list', 'get'].includes(action)) {
+        return fail('BAD_ARGS', '未知 action：' + action + '（可用 calibrate/measure/list/get）')
+      }
+      if (action !== 'list' && !args.project) return fail('BAD_ARGS', action + ' 需要 project')
+      if (action === 'measure' && !Array.isArray(args.measures)) return fail('BAD_ARGS', 'measure 需要 measures 数组')
+      const requirement = action === 'measure' ? ['numpy', 'PIL'] : (action === 'calibrate' ? ['PIL'] : 'base')
+      const result = await invoke('cad_refkit.py', {
+        workspace,
+        action,
+        project: args.project ?? null,
+        frame: args.frame ?? null,
+        masks: args.masks ?? null,
+        grid: args.grid ?? null,
+        frame_id: args.frame_id ?? null,
+        measures: args.measures ?? null,
+      }, { requirement, timeoutMs: 280000, fallbackCode: 'REF_FAILED' })
+      if (result.ok === false) return result
+      result.summary = result.summary ?? (action + ' 完成')
+      return result
+    },
+  }))
+
+  // 12) 米制网格叠图（多视角）
+  ctx.tools.register(defineTool({
+    name: 'cadw_grid',
+    description:
+      '把模型与参考图套上同一套米制网格（列 = u 每 u_step 一个字母 A 起，行 = v 每 v_step 一个数字 1 起），' +
+      '输出多视角叠图：side（x-z）、top（x-y）、front/rear（y-z）；参考帧逐帧叠网格与责任分区色块，' +
+      '并给出逐件格号索引（parts → cell / cells）。模型侧给 stl（单色轮廓）或 mesh（带部件名的三角网格，按部件配色）。' +
+      '**差异定位先看这张图**：用户圈一块 → 读格号 → cadw_diff 出数字 → cadw_dispatch 派工。',
+    parameters: {
+      project: { type: 'string', description: '参考图工程 id（可省略：只叠模型侧网格）' },
+      parts: { type: 'json', description: '逐件 bbox：[{name, bbox:[x0,y0,z0,x1,y1,z1]}]（米；units=mm 时自动换算）' },
+      report: { type: 'string', description: '逐件 bbox 报告 JSON 路径（含 bbox 映射或 parts 数组）' },
+      stl: { type: 'string', description: 'STL 路径（单色轮廓；stl_units 缺省 mm）' },
+      stl_units: { type: 'string', description: 'stl 单位：mm（默认）/m' },
+      mesh: { type: 'string', description: '带名字的三角网格 JSON 路径（{names:[], tris:[[]]}，米）' },
+      units: { type: 'string', description: 'parts 的单位：m（默认）/mm' },
+      views: { type: 'array', description: '视图列表，默认 ["side","top"]；可选 side/top/front/rear' },
+      zones: { type: 'json', description: '责任分区：[{code,label,u0,u1,v0,v1,fill:[r,g,b,a]}]，会画在参考帧上' },
+      slice: { type: 'json', description: '切片：{axis:"x", from:0, to:12}；section 视图必填（艉部/吊舱剖面用）' },
+      grid: { type: 'json', description: '覆盖工程的网格：{u_step,v_step,u_origin,v_origin}' },
+      scale: { type: 'number', description: '模型渲染比例（像素/米，默认 22）' },
+      label_parts: { type: 'boolean', description: '是否在图上标注部件名（部件多时会糊，默认 false）' },
+      ref_scale: { type: 'number', description: '参考帧放大倍数（默认 1.6，便于读格号）' },
+      out_dir: { type: 'string', description: '输出目录；缺省 <workspace>/cad-output/refkit/<project>' },
+      basename: { type: 'string', description: '文件名前缀' },
+      workspace: { type: 'string', description: '工作区根目录' },
+    },
+    timeoutMs: 600000,
+    output: { schema: OUTPUT_SCHEMA, render: renderResult },
+    async execute(args, exec) {
+      const workspace = workspaceOf(args, exec, ctx)
+      if (!args.stl && !args.mesh && !args.parts && !args.report) {
+        return fail('BAD_ARGS', 'cadw_grid 需要模型：parts / report / stl / mesh 至少给一个')
+      }
+      const outDir = args.out_dir ? resolveOutDir(workspace, args.out_dir, join(defaultOutputDir(workspace), 'refkit')) : null
+      const result = await invoke('cad_refkit.py', {
+        workspace,
+        action: 'render',
+        project: args.project ?? 'grid',
+        parts: args.parts ?? null,
+        report: args.report ? resolve(workspace, String(args.report)) : null,
+        stl: args.stl ? resolve(workspace, String(args.stl)) : null,
+        stl_units: args.stl_units ?? 'mm',
+        mesh: args.mesh ? resolve(workspace, String(args.mesh)) : null,
+        units: args.units ?? 'm',
+        views: Array.isArray(args.views) && args.views.length ? args.views : ['side', 'top'],
+        zones: args.zones ?? null,
+        slice: args.slice ?? null,
+        grid: args.grid ?? null,
+        scale: Number(args.scale) || null,
+        label_parts: args.label_parts === true,
+        ref_scale: Number(args.ref_scale) || null,
+        out_dir: outDir,
+        basename: sanitizeBasename(args.basename, 'grid-' + stamp()),
+      }, { requirement: ['numpy', 'PIL'], timeoutMs: 580000, fallbackCode: 'REF_FAILED' })
+      if (result.ok === false) return result
+      const images = Array.isArray(result.images) ? result.images : []
+      const sheetPath = result.contact_sheet ?? result.zones_image ?? (result.model_views ?? [])[0]
+      const saved = sheetPath ? await saveImageRef(ctx, sheetPath) : { note: '没有生成图片' }
+      result.image = saved.image
+      result.imageNote = saved.note
+      const blanks = images.filter((item) => item.blank)
+      result.summary = [
+        result.summary ?? '',
+        blanks.length ? '警告：' + blanks.length + ' 张图疑似空白' : '',
+      ].filter(Boolean).join('\n')
+      return result
+    },
+  }))
+
+  // 13) 差分表
+  ctx.tools.register(defineTool({
+    name: 'cadw_diff',
+    description:
+      '把参考真值与模型实测逐项比对，产出 格号 | 指标 | 零件 | 分量 | 参考带 | 实测 | Δ | 判定 的差分表（md + json）。' +
+      '两种行：targets（目标带，来自 cadw_ref 量测或手写带）与 profile（参考轮廓量测 vs 模型 STL/网格的逐格上下缘）。' +
+      '判定 PASS/WARN/FAIL；findings 里的 hint 直接指向改哪个零件的哪个分量。glossary：part 支持子串匹配，名字精确相等的部件优先。',
+    parameters: {
+      project: { type: 'string', required: true, description: '参考图工程 id' },
+      parts: { type: 'json', description: '逐件 bbox：[{name, bbox:[...]}]（米）' },
+      report: { type: 'string', description: '逐件 bbox 报告 JSON 路径' },
+      targets: { type: 'json', description: '目标带：[{name, part, field, ref:[lo,hi]}]；缺省用工程里已存的目标带' },
+      mesh: { type: 'string', description: '带名字的三角网格（轮廓行用它算模型包络，比 bbox 准）' },
+      stl: { type: 'string', description: 'STL（单色轮廓）' },
+      units: { type: 'string', description: 'parts 单位：m（默认）/mm' },
+      profile: { type: 'boolean', description: '是否比轮廓（默认 true）' },
+      profile_measures: { type: 'array', description: '只比这些 profile 量测 id（缺省全部）' },
+      tolerance: { type: 'number', description: '轮廓判定阈值（米，默认 1.0）' },
+      out_dir: { type: 'string', description: '输出目录' },
+      workspace: { type: 'string', description: '工作区根目录' },
+    },
+    timeoutMs: 600000,
+    output: { schema: OUTPUT_SCHEMA, render: renderResult },
+    async execute(args, exec) {
+      const workspace = workspaceOf(args, exec, ctx)
+      if (!args.parts && !args.report) {
+        return fail('BAD_ARGS', 'cadw_diff 需要模型实测：parts 或 report（逐件 bbox）')
+      }
+      const result = await invoke('cad_refkit.py', {
+        workspace,
+        action: 'diff',
+        project: args.project,
+        parts: args.parts ?? null,
+        report: args.report ? resolve(workspace, String(args.report)) : null,
+        targets: args.targets ?? null,
+        mesh: args.mesh ? resolve(workspace, String(args.mesh)) : null,
+        stl: args.stl ? resolve(workspace, String(args.stl)) : null,
+        units: args.units ?? 'm',
+        profile: args.profile !== false,
+        profile_measures: Array.isArray(args.profile_measures) ? args.profile_measures : null,
+        tolerance: Number(args.tolerance) || null,
+      }, { requirement: ['numpy'], timeoutMs: 580000, fallbackCode: 'REF_FAILED' })
+      if (result.ok === false) return result
+      const fails = (result.rows ?? []).filter((row) => row.verdict === 'FAIL' || row.verdict === 'MISSING')
+      const profileFails = (result.profile_rows ?? []).filter((row) => row.verdict === 'FAIL' || row.verdict === 'MISSING')
+      result.failure_count = fails.length + profileFails.length
+      result.summary = [
+        result.summary ?? '',
+        fails.length ? '未通过（目标带）：' + fails.slice(0, 6).map((row) =>
+          (row.cell ?? '-') + ' ' + (row.name ?? '') + ' Δ' + row.delta).join('；') : '',
+        profileFails.length ? '未通过（轮廓）：' + profileFails.slice(0, 6).map((row) => row.cell).join('、') : '',
+      ].filter(Boolean).join('\n')
+      return result
+    },
+  }))
+
+  // 14) 对抗审查
+  ctx.tools.register(defineTool({
+    name: 'cadw_audit',
+    description:
+      '建模对抗审查（只读 + 纯计算）：从九个角度机械地找错——datum 单位/包络/实体数/STL 一致性、' +
+      'float 悬空、buried 埋入、clash 穿插、dup 重复、sketch 过定义/欠定义、shape 形状（吃 cadw_diff 结果）、' +
+      'mass 空壳破面、naming 命名。每条发现给 P0/P1/P2、格号、期望/实测/Δ 与可执行的改法（改哪个零件哪个量）。' +
+      '阈值数据驱动（rules/audit_rules.json），可用 rules 局部覆盖。**P0 未清零不要进入调形状阶段。**',
+    parameters: {
+      parts: { type: 'json', description: '逐件 bbox：[{name, bbox:[x0,y0,z0,x1,y1,z1]}]，或 {name: bbox} 映射' },
+      report: { type: 'string', description: '逐件 bbox 报告 JSON 路径（与 parts 二选一）' },
+      facts: { type: 'json', description: '测量事实：直接放 cadw_measure(scope:"all") 的返回值（bbox_mm/volume_mm3/solid_count/sketches）' },
+      diff: { type: 'json', description: '差分结果：直接放 cadw_diff 的返回值（或报告 JSON 路径）' },
+      stl: { type: 'string', description: 'STL 路径：与 parts 交叉核对三角数/包围盒' },
+      rules: { type: 'json', description: '规则覆盖：{tolerances:{gap_tol:0.12}, cantilever:[...], angles:{float:false}}' },
+      units: { type: 'string', description: 'parts 单位：m（默认）/mm' },
+      grid: { type: 'json', description: '格号换算：{u_step,v_step,u_origin,v_origin}' },
+      model_bbox: { type: 'array', description: '允许包络 [x0,y0,z0,x1,y1,z1]（米）' },
+      support_planes: { type: 'array', description: '支撑标高（米的 z 列表），缺省用规则里的甲板标高' },
+      out_dir: { type: 'string', description: '报告输出目录；缺省 <workspace>/cad-output/audit' },
+      write_report: { type: 'boolean', description: '是否写 md 报告（默认 true）' },
+      workspace: { type: 'string', description: '工作区根目录' },
+    },
+    timeoutMs: 240000,
+    output: { schema: OUTPUT_SCHEMA, render: renderResult },
+    async execute(args, exec) {
+      const workspace = workspaceOf(args, exec, ctx)
+      if (!args.parts && !args.report && !args.facts && !args.diff) {
+        return fail('BAD_ARGS', 'cadw_audit 至少需要 parts / report / facts / diff 之一')
+      }
+      const result = await invoke('cad_audit.py', {
+        workspace,
+        parts: args.parts ?? null,
+        report: args.report ? resolve(workspace, String(args.report)) : null,
+        facts: args.facts ?? null,
+        diff: args.diff ?? null,
+        stl: args.stl ? resolve(workspace, String(args.stl)) : null,
+        rules: args.rules ?? null,
+        units: args.units ?? 'm',
+        grid: args.grid ?? null,
+        model_bbox: Array.isArray(args.model_bbox) ? args.model_bbox : null,
+        support_planes: Array.isArray(args.support_planes) ? args.support_planes : null,
+        out_dir: args.out_dir ? resolveOutDir(workspace, args.out_dir, join(defaultOutputDir(workspace), 'audit')) : null,
+        write_report: args.write_report !== false,
+      }, { requirement: 'base', timeoutMs: 220000, fallbackCode: 'AUDIT_FAILED' })
+      if (result.ok === false) return result
+      result.summary = result.summary ?? ('审查：' + result.verdict)
+      return result
+    },
+  }))
+
+  // 15) 分区派工
+  ctx.tools.register(defineTool({
+    name: 'cadw_dispatch',
+    description:
+      '把差分表与对抗审查的失败项按责任区变成子智能体工单：每区一张 markdown（九段：身份与任务板、先看差异、' +
+      '环境与**唯一写作用域**、必读、坐标、任务、自检与达标线、**子区拆分与递归**、**模型选择与回报**），' +
+      '写盘到 .cad-workbench/dispatch/<batch>/<owner>.md，并返回可直接交给 subagent 的 prompt。' +
+      '工单里写死四条硬规则：先 list_subagent_models 校验模型、缺省继承父会话、失败回退顺序、递归深度上限 2 且子代理原样继承。',
+    parameters: {
+      zones: {
+        type: 'json',
+        required: true,
+        description: '责任区：[{code,label,u0,u1,v0,v1,owner,module,write_scope:[...]}]（u/v 单位米）',
+      },
+      project: { type: 'string', description: '参考图工程 id（写进工单的复测命令）' },
+      project_root: { type: 'string', description: '子智能体的工作根；缺省用 workspace' },
+      diff: { type: 'json', description: 'cadw_diff 的返回值（或 {rows,profile_rows}）' },
+      audit: { type: 'json', description: 'cadw_audit 的返回值（取 findings）' },
+      agents: { type: 'json', description: '可选：[{owner, name, model_hint:{provider,model}}]' },
+      brief: {
+        type: 'json',
+        description: '工单素材：{must_read:[], frames:[{id,path,view}], coordinate_note, conventions:[], build_cmd, verify_cmds:[], task_board, read_only:[]}',
+      },
+      recursion: { type: 'json', description: '递归：{allow, max_depth(2), split_threshold(6), max_children(4)}' },
+      model_policy: {
+        type: 'json',
+        description: '模型选择：{preferred:[], exclude:[], note}；exclude 会写进每张工单（"不得派给"），例如排除某个不可用/昂贵模型',
+      },
+      grid: { type: 'json', description: '格号换算：{u_step,v_step}' },
+      out_dir: { type: 'string', description: '工单输出目录；缺省 <workspace>/.cad-workbench/dispatch/<batch>' },
+      workspace: { type: 'string', description: '工作区根目录' },
+    },
+    timeoutMs: 120000,
+    output: { schema: OUTPUT_SCHEMA, render: renderResult },
+    async execute(args, exec) {
+      const workspace = workspaceOf(args, exec, ctx)
+      const result = buildWorkOrders({
+        workspace,
+        project_id: args.project ?? null,
+        project_root: args.project_root ? resolve(workspace, String(args.project_root)) : workspace,
+        zones: args.zones ?? [],
+        diff: args.diff ?? null,
+        audit: args.audit ?? null,
+        agents: args.agents ?? [],
+        brief: args.brief ?? {},
+        recursion: args.recursion ?? {},
+        model_policy: args.model_policy ?? {},
+        grid: args.grid ?? {},
+        out_dir: args.out_dir ? resolve(workspace, String(args.out_dir)) : null,
+      })
+      if (!result || result.ok === false) {
+        return fail(result?.error?.code ?? 'DISPATCH_FAILED', result?.error?.message ?? '工单生成失败')
+      }
+      result.summary = result.summary ?? ('工单 ' + result.count + ' 张')
+      return result
+    },
+  }))
+
+  // 16) 作业台账
   ctx.tools.register(defineTool({
     name: 'cadw_job',
     description:

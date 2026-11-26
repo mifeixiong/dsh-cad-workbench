@@ -30,6 +30,8 @@ def main():
     codes.append(run('session_cases', [python, os.path.join(HERE, 'session_cases.py')]))
     codes.append(run('graph_cases', [python, os.path.join(HERE, 'graph_cases.py')]))
     codes.append(run('review_cases', [python, os.path.join(HERE, 'review_cases.py')]))
+    codes.append(run('refkit_cases', [python, os.path.join(HERE, 'refkit_cases.py')]))
+    codes.append(run('audit_cases', [python, os.path.join(HERE, 'audit_cases.py')]))
     if '--python-only' in sys.argv:
         failed = sum(1 for code in codes if code != 0)
         print('\n总计 %d 项，失败 %d（--python-only）' % (len(codes), failed))
@@ -37,6 +39,7 @@ def main():
     node = shutil.which('node')
     if node:
         codes.append(run('selftest', [node, '--test', os.path.join(HERE, 'selftest.mjs')]))
+        codes.append(run('dispatch_cases', [node, '--test', os.path.join(HERE, 'dispatch_cases.mjs')]))
     else:
         candidates = [
             os.path.join(os.path.expanduser('~'), '.dsh', 'dsh-runtimes', 'dsh-primary-runtime',
@@ -45,6 +48,7 @@ def main():
         found = next((path for path in candidates if os.path.isfile(path)), None)
         if found:
             codes.append(run('selftest', [found, '--test', os.path.join(HERE, 'selftest.mjs')]))
+            codes.append(run('dispatch_cases', [found, '--test', os.path.join(HERE, 'dispatch_cases.mjs')]))
         else:
             print('\n跳过 JS 自测：找不到 node（可安装 Node 20+ 或设置 PATH）')
     failed = sum(1 for code in codes if code != 0)

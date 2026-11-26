@@ -96,9 +96,12 @@ const ctx = {
 apply(ctx)
 
 console.log('安装副本：' + target)
-check('tool.count', definitions.size === 10, '实际 ' + definitions.size)
+check('tool.count', definitions.size === 15, '实际 ' + definitions.size)
+for (const name of ['cadw_ref', 'cadw_grid', 'cadw_diff', 'cadw_audit', 'cadw_dispatch']) {
+  check('tool.' + name, definitions.has(name), '未注册')
+}
 const skills = skillFactory ? await skillFactory().list() : []
-check('skill.count', skills.length === 4, '实际 ' + skills.length)
+check('skill.count', skills.length === 6, '实际 ' + skills.length)
 
 const workspace = await mkdtemp(join(tmpdir(), 'cadw-installed-'))
 

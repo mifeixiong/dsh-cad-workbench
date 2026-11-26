@@ -132,6 +132,10 @@ def main(spec):
         'stl_review': True,
         'step_review': True,
         'massprops': bool(modules.get('win32com')),
+        # 参考图对位（v0.4）：标定/量测/叠图/差分只要 numpy + Pillow，不需要 SolidWorks
+        'refkit': bool(modules.get('numpy') and modules.get('PIL')),
+        # 对抗审查是纯标准库 JSON 计算
+        'audit': True,
     }
     result['capabilities'] = capabilities
 
@@ -140,6 +144,8 @@ def main(spec):
         result['suggestions'].append('安装 pywin32：pip install pywin32（COM 建模/截图/出图需要）')
     if not modules.get('PIL'):
         result['suggestions'].append('安装 Pillow：pip install Pillow（截图 PNG 与拼图需要）')
+    if not modules.get('numpy'):
+        result['suggestions'].append('安装 numpy：pip install numpy（参考图量测、网格叠图、轮廓差分需要）')
     if not modules.get('ezdxf'):
         result['suggestions'].append('安装 ezdxf：pip install ezdxf（DXF 图纸审查需要；不影响建模）')
     if not (templates.get('part') or {}).get('path'):
@@ -157,6 +163,8 @@ def main(spec):
         result['solidworks'].get('revision') or '未连接',
         ', '.join(name for name, ok in capabilities.items() if ok) or '无',
     )
+    if not capabilities['refkit']:
+        result['summary'] += '（参考图对位不可用：缺 numpy/Pillow）'
     return result
 
 

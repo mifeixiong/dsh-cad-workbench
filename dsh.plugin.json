@@ -1,8 +1,8 @@
 {
   "id": "dsh-cad-workbench",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "main": "index.js",
-  "description": "Mechanical CAD workbench for DeepSeek Harness: declarative SolidWorks modelling with measured verification, view self-check, drawings, and DXF/STEP/STL review.",
+  "description": "Mechanical CAD workbench for DeepSeek Harness: declarative SolidWorks modelling with measured verification, reference-image alignment (calibration, metric grids, diff), adversarial review, and zone-scoped subagent dispatch.",
   "engines": {
     "dsh": ">=0.2.2-rc.1 <0.3.0"
   },
@@ -17,13 +17,20 @@
       "cadw_drawing",
       "cadw_review",
       "cadw_job",
-      "cadw_assembly"
+      "cadw_assembly",
+      "cadw_ref",
+      "cadw_grid",
+      "cadw_diff",
+      "cadw_audit",
+      "cadw_dispatch"
     ],
     "skills": [
       "cad-modeling-workflow",
       "solidworks-com",
       "cad-feature-graph",
-      "cad-drawing-gb"
+      "cad-drawing-gb",
+      "cad-reference-match",
+      "cad-adversarial-review"
     ]
   }
 }

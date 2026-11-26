@@ -1,5 +1,81 @@
 # Changelog
 
+## 0.4.0 (2026-11-26) · 参考图对位 + 对抗审查 + 分区派工
+
+来源：一次真实的 90 m 级破冰船外观还原（v3 重建 → v4 分工 → v5 像素重测），把其中可复用的方法固化成工具。
+案例复盘见 [docs/case-jidi-icebreaker.md](docs/case-jidi-icebreaker.md)，数据契约见 [docs/reference-modeling.md](docs/reference-modeling.md)。
+
+### 新增工具（5 个）
+
+- `cadw_ref`：参考图工程。两轴两点线性标定（`checks` 判两轴 m/px 比例差 >10%、v 斜率符号、基准点越界）；
+  颜色/深色/墨迹掩膜（区域过滤用**米**，换帧不重调）；四种量测 `profile/bbox/extent/coverage`；
+  量测项可带 `target` 把"参考值 ± tol"固化成目标带。工程存 `.cad-workbench/refkit/<project>.json`。
+- `cadw_grid`：米制网格叠图。side/top/front/rear 多视角，模型（STL z-buffer 投影或带名三角网格）与参考帧
+  套**同一套格号**（列 A 起每 u_step、行 1 起每 v_step）；责任分区色块；逐件格号索引 `cells`；
+  参考帧放大后叠网格，用户圈注即可读格号。
+- `cadw_diff`：差分表。目标带行（精确名优先、`re:` 正则、`matched` 列出实际并集）+
+  轮廓行（逐格上下缘，模型侧优先用三角网格沿边采样，bbox 只作降级）；输出
+  `格号|指标|零件|分量|参考带|实测|Δ|判定` 的 md 报告与 PASS/WARN/FAIL/MISSING 计数。
+- `cadw_audit`：对抗审查九角度 —— `datum`（单位/包络/实体数/STL 一致性）、`float`（悬空）、`buried`（埋入）、
+  `clash`（穿插）、`dup`（重复/IoU）、`sketch`（过定义 P0 / 欠定义 P1）、`shape`（差分 FAIL 汇总）、
+  `mass`（空壳/破面）、`naming`（命名约定）。阈值数据驱动 `rules/audit_rules.json`，可局部覆盖。
+- `cadw_dispatch`：分区工单。按 zone 把 diff/audit 的发现分组，生成九段式工单（身份与任务板、先看差异、
+  环境与**唯一写作用域**、必读、坐标、任务、自检与达标线、**子区拆分与递归**、**模型选择与回报**），
+  写盘 `.cad-workbench/dispatch/<batch>/<owner>.md`，并给出可直接传给 `subagent` 的 prompt。
+
+### 技能
+
+- 新增 `cad-reference-match`：标定→量测→网格→差分→派工的完整流程、掩膜选择表、口径三条铁律、迭代节奏。
+- 新增 `cad-adversarial-review`：九角度判据、P0 优先原则、读报告顺序、规则扩写、常见误判。
+- `cad-modeling-workflow`：新增 M4 参考图模式、§4.6 分区并行与子智能体派工（写作用域/模型校验/递归/独立复测）、
+  §4.7 参考图对位；自检关卡加入 `cadw_audit` P0 清零；失败表补 `REF_INVALID`、整列同号口径问题、欠定义。
+
+### 关键设计（踩过的坑）
+
+- **口径一致性**：参考掩膜量的是"红壳"，模型侧必须 `model_filter:"hull loft"`，否则舷墙被算进上缘，
+  整张表恒定 +1.0 m 假偏差 —— 差分表因此保留 `compare:["vmax"]` 只比可靠的一边。
+- **轮廓不能用 bbox**：被布尔切掉的尾部在 bbox 里仍是满高；`mesh` 沿边采样后，破冰船 24 格轮廓从
+  "全 FAIL" 变成 17 PASS / 7 FAIL（7 条都是真实差异或掩膜伪影）。
+- **精确名优先**：`part:"bridge"` 若只做子串匹配会把 `bridge roof red`/`bridge glazing` 并进来，
+  驾驶室长度从 12.4 m 变成 15.0 m；现在同名部件优先，其余并集并回显 `matched`。
+- **派工不校验模型 = 白等一轮**：真实事故里 4 个子智能体因指定了不可用 provider/model 全部
+  "failed before it finished"；工单现在把"先 `list_subagent_models`、缺省继承父会话、失败回退、
+  深度上限 2、子代理原样继承"写成硬规则。
+
+### 独立复核后补的修正（v0.4.0 内）
+
+- `cad_audit` 的 `float`：只从"底面之下的支撑"里取最近者（原先会把一个夹在 0 与 9.3 之间的零件判成"低于 9.3 面 4.3 m"）；
+  容差取 `max(gap_tol, buried_tol)` + 1e-9，球罩坐进基座 0.1 m 不再算悬空；向下的负 gap 只在对方**更大**时才报。
+- `cad_audit` 的 `units`：`mm` 时 `support_planes` / `model_bbox` / `grid` 一并换算；`facts.bbox_mm` 按"尺寸三元组"读。
+- `cad_audit` 的 `sketch`：认 `cadw_measure` 的真实字段 `constrained_status`/`constrained_status_text`（原先只认插件根本不产出的
+  `over_defined`，过定义会被误判成欠定义 P1）；新增 `no_solution`/`invalid_solution` → P0。
+- `cadw_dispatch` 新增 `model_policy`：`{preferred, exclude, note}`，`exclude` 以"禁用清单（不得派给）"写进每张工单，
+  只剩禁用项时要求回报 lead —— 来自真实运维约束（某个模型被明确停用）。
+- `cadw_diff`/`cadw_grid` 支持"只有逐件 bbox"时也出模型侧网格图（包围盒+网格，标注为降级模式）。
+
+### 第二轮独立复核（cad_refkit.py）后补的修正
+
+- **分箱**：`profile`/`coverage`/`model_profile` 的箱数改用 `ceil(span/step)`（原来 `round` 会丢尾格，
+  `[0,10] step=4` 只测到 8 m 而 `u_range` 仍写 0..10）；采样上限 64 → 512，消除"模型与参考等大也报 MISSING"。
+- **视图轴**：`side/top/front/rear` 各用自己的 u/v 轴画零件框、标签与格号（原来统一按 x/z，
+  俯视/正视的框会画到画布外面）；新增 `cells_by_view`；越界格号改 `N<列>R<行>` 不再与 `C-13` 混读。
+- **参考帧叠图**认 `u_origin/v_origin`（原来与格号不同源，整体错位）。
+- **目标带判定**：WARN 阈值改为 `warn_factor × 半带宽`（原来乘整带宽，阈值放宽一倍）；`warn_factor: 0` 生效。
+- **差分**：允许"只有 STL/网格"的纯轮廓差分；`model_filter` 匹配不到部件时报 MISSING 而不是静默退回整网。
+- **量测**：缺 `id` 直接 `BAD_ARGS`；顶层 `save_targets`+`tol` 生效；`extent` 的 `band: 0` 生效、`pixels` 统计真实像素并补齐 `u0/u1/v0/v1`；
+  `coverage` 空箱计入 `gaps`。
+- **其它**：`field_value` 的 `zmax/ymax` 改为字面值（绝对值另给 `zabs/yabs`）；`render` 先校验视图再写盘（不留半套产物）；
+  `frame.slice` 不再是死字段；二进制 STL 允许尾部多余字节；标题移到画布底部留白，不再压住列标签；MISSING 行补 `margin: null`。
+
+### 验证
+
+- 离线 `python test/refkit_cases.py` → 28/28（合成参考图：标定/四种量测/目标带/网格/差分 PASS 与 FAIL/MISSING，另含两轴比例告警、未知掩膜/未知视图错误路径）。
+- 离线 `python test/audit_cases.py` → 23/23（九角度、贴面件不误报埋入、船体不当宿主、clash 相对阈值、IoU 只作 P2、rules 开关、幂等、STL 交叉核对）。
+- Node `node --test test/selftest.mjs` → 12 例（工具注册、参数面、技能 provider）；`test/dispatch_cases.mjs` → 17 例（含跨 Z 列号、交界冲突、区界反转、格号排序、prompt 形态）。
+- 真实帧回归：frame_05 标定 → 量测（烟囱 38.2~47.0、球罩 Ø3.4、驾驶室 ~12 m、A 架顶 17.7）→
+  与 v10 装配报告差分：目标带 8/8 PASS（总长 89.95、半宽 8.914、首楼甲板 13.75、烟囱 dx 8.8…）。
+
+
 ## 0.3.0 (2026-11-13) · 辅助线驱动建模 + 圆柱面同心配合 + 窗口管理
 
 - Feature Graph 新增 `line` 实体与 `construction: true`（构造线/辅助线，不参与拉伸轮廓）；polyline/circle/arc 也可标记构造。

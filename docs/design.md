@@ -37,6 +37,28 @@
 | 错误 | ok:false + error{code,message,details} | 模型能按 code 决策；细节不丢 |
 | 工具面 | 10 个，cadw_ 前缀 | 覆盖全流程，避免与生态冲突 |
 
+## 参考图对位子系统（v0.4）
+
+	data/图片 ─ cadw_ref（标定 + 掩膜量测）─→ .cad-workbench/refkit/<project>.json
+	                │                              ▲
+	模型 STL/网格/逐件 bbox ─ cadw_grid ─→ out/refkit/<project>/*.png + *_cells.json
+	                │                              │
+	                └─ cadw_diff ─→ 差分表 md/json ─┴─ cadw_audit ─→ findings（P0/P1/P2）
+	                                                    │
+	                                          cadw_dispatch ─→ .cad-workbench/dispatch/<batch>/*.md
+
+| 决策 | 选择 | 理由 |
+|---|---|---|
+| 脚本划分 | `cad_refkit.py`（标定/量测/叠图/差分）+ `cad_audit.py`（纯计算审查）+ `lib/dispatch.js`（文本工单） | 像素活与判定活分开；工单是纯字符串处理，放 JS 省一次进程且好测 |
+| 坐标系 | 工程里存 `axes{u,v,w}`，默认 u=x/v=z/w=y | 换产品（机架、建筑）不用改代码 |
+| 掩膜 | 声明式规则（color/dark/ink）+ **米制**区域过滤 | 像素过滤换帧就要重调；米制过滤跨帧通用 |
+| 轮廓 | 模型侧优先三角网格沿边采样，bbox 只作降级 | bbox 把被布尔切掉的部位按满高算，产生 ±4 m 假偏差 |
+| 口径 | 掩膜 ↔ `model_filter` 显式对齐，`compare` 只比可靠的一边 | 否则恒定系统偏差（舷墙被算进船体上缘） |
+| 埋入判据 | 缩进包含（inset contain），不是 bbox 相交 | 贴面件（舷窗）与壳体 bbox 必然相交，相交判据会全量误报 |
+| 审查阈值 | 数据驱动 `rules/audit_rules.json` | 不同产品甲板标高/悬臂件不同，不要把阈值焊进代码 |
+| 工单 | 九段固定结构，写作用域与模型策略写成硬规则 | 工单缺写作用域就会两个 agent 互踩；缺模型校验就会整批失败 |
+| 递归 | 子区默认 `write_scope: []`（只读出补丁） | 同一模块文件不能并发写；子代理只分析，写由本级执行 |
+
 ## 信任等级
 
 - verified：有 expect 且逐轴/体积/特征数全部通过，产物齐全；
@@ -78,6 +100,9 @@ cadw_job.finish 只在这三种状态上给 delivered/partial/failed；partial �
 	scripts/sw_assembly.py   装配体（插入/配合/固定/列表）
 	scripts/cad_review.py    DXF/STL/STEP 审查
 	scripts/cad_doctor.py    环境能力
+	scripts/cad_refkit.py    参考图：标定/掩膜量测/网格叠图/差分
+	scripts/cad_audit.py     对抗审查九角度（纯计算）
+	lib/dispatch.js          分区工单（九段 + 递归 + 模型策略）
 	rules/dxf_rules.json     可覆盖的图纸规则
 	skills/                  4 个随包技能
 
@@ -87,3 +112,5 @@ cadw_job.finish 只在这三种状态上给 delivered/partial/failed；partial �
 - v0.3.0 ✅：辅助线/交点孔、圆柱面同心配合、已打开窗口管理（list 清单、close 批量、close_others、close_all；脏文档/隐藏文档保护）。
 - v0.4：装配干涉检查与运动；shell 节点；偏移基准面；slot/rounded_rect；扫掠切除。
 - v0.5：可选 FreeCAD/CadQuery 后端（能力路由）；CAD 模式预设；Web 端只读查看器。
+- v0.4 ✅：参考图对位（`cadw_ref`/`cadw_grid`/`cadw_diff`）、对抗审查（`cadw_audit`）、分区派工（`cadw_dispatch`）、
+  两个新技能；差分表与审查发现可直接喂给派工单。
