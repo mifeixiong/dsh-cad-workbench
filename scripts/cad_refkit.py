@@ -21,6 +21,7 @@ import os
 import re
 import sys
 import time
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -1653,8 +1654,10 @@ def action_diff(spec):
     profile_counts = {'PASS': 0, 'WARN': 0, 'FAIL': 0, 'MISSING': 0}
     for row in profile_rows:
         profile_counts[row['verdict']] = profile_counts.get(row['verdict'], 0) + 1
-    # 秒级时间戳会撞车：同一秒内两次 diff 会互相覆盖（复核 P2-17），补毫秒
-    stamp = time.strftime('%Y%m%dT%H%M%S') + '-%03d' % (int(time.time() * 1000) % 1000)
+    # 秒级时间戳会撞车：同一秒内两次 diff 会互相覆盖（复核 P2-17）；
+    # 毫秒也不够 —— CI 上两次调用落在同一毫秒仍会撞（case_diff_report_name_unique 抓到），
+    # 所以再拼一段随机后缀，保证"同进程/跨进程、同毫秒"都不重名。
+    stamp = time.strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:6]
     report_path = os.path.join(out_dir, 'diff-%s.md' % stamp)
     lines = ['# 差分表 · ' + str(project.get('id')), '',
              '生成：' + common.now_iso(), '',
